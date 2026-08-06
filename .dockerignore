@@ -1,0 +1,56 @@
+# -----------------------------------------------------------------------------
+# .dockerignore — build context is the repo root
+# Keep only what is needed at runtime inside the image.
+# -----------------------------------------------------------------------------
+
+# Credentials — never bake secrets into the image
+**/.env
+**/.env.*
+
+# Python cache
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+
+# Virtual environments
+.venv/
+
+# Dev / lint / type-check artefacts
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.bob/
+
+# Tests — not needed at runtime
+tests/
+
+# Docs & project meta
+docs/
+README.md
+LICENSE*
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# CI / pre-commit / secrets scan
+.pre-commit-config.yaml
+.secrets.baseline
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+
+# Python version pin (runtime uses the image's Python)
+.python-version
+
+# Pyright config (type-check only)
+pyrightconfig.json

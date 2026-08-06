@@ -1,0 +1,14 @@
+agent:
+  id: "golem-agent-001"
+  name: "Golem Agent Runner"
+  description: "Generic automation agent powered by Golem."
+  endpoint: "http://localhost:8001"
+  system_prompt: "You are a helpful generic automation agent."
+  enabled_skill: "bash,http_check"
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
+  url: "https://us-south.ml.cloud.ibm.com"
