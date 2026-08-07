@@ -6,7 +6,7 @@
 set -euo pipefail
 
 HOST="0.0.0.0"
-PORT="8001"
+PORT="8000"
 RELOAD="--reload"
 
 # Parse optional flags

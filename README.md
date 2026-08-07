@@ -46,7 +46,7 @@ Run the development script to boot up the agent server:
 ./app.sh
 ```
 
-This loads the configuration from `src/golem-runner/config.yaml` and secrets from `src/golem-runner/.env`, starting the FastAPI application with reload enabled on `http://localhost:8001`.
+This loads the configuration from `src/golem-runner/config.yaml` and secrets from `src/golem-runner/.env`, starting the FastAPI application with reload enabled on `http://localhost:8000`.
 
 ### 4. Chat with the agent
 
@@ -54,14 +54,14 @@ You can send chat requests to the agent via HTTP POST.
 
 **Example A: Ask the agent what it can do**
 ```bash
-curl -X POST http://localhost:8001/chat \
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What can you do?"}'
 ```
 
 **Example B: Ask the agent to inspect a website (triggers the `http_check` tool)**
 ```bash
-curl -X POST http://localhost:8001/chat \
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Check if https://google.com is reachable"}'
 ```
@@ -86,7 +86,7 @@ The image ships with a default `config.yaml` baked in. You can run the container
 
 ```bash
 docker run -d --name my-agent \
-  -p 8001:8001 \
+  -p 8000:8000 \
   --env-file src/golem-runner/.env \
   golem-runner:v1
 ```
@@ -97,7 +97,7 @@ If you want to override the default configuration (agent identity, model setting
 
 ```bash
 docker run -d --name my-agent \
-  -p 8001:8001 \
+  -p 8000:8000 \
   --env-file src/golem-runner/.env \
   -v "$(pwd)/my-config.yaml:/app/src/golem-runner/config.yaml:ro" \
   golem-runner:v1
@@ -132,8 +132,8 @@ podman build -t golem-runner:v1 .
 `minikube image load` does not work with the Podman driver. Instead, save the image to a tar archive and load it directly into the Minikube node:
 
 ```bash
-podman save golem-runner:v1 -o golem-runner-v1.tar
-minikube image load golem-runner-v1.tar
+podman save golem-runner:v1 -o /tmp/golem-runner-v1.tar
+minikube image load /tmp/golem-runner-v1.tar
 ```
 
 ### 3. Verify the image is available inside Minikube
@@ -155,10 +155,22 @@ containers:
 
 ### 5. Forward the port
 
-Once the Pod is running, forward port `8001` to your local machine:
+Once the Pod is running, forward port `8000` to your local machine.
+
+First, get the namespace and pod name:
 
 ```bash
-kubectl port-forward pod/<pod name> 8001:8001 -n <namespace>
+# List namespaces
+kubectl get namespaces
+
+# List pods in the target namespace
+kubectl get pods -n <namespace>
+```
+
+Then start the port-forward:
+
+```bash
+kubectl port-forward pod/<pod name> 8000:8000 -n <namespace>
 ```
 
 ### 6. Chat with the agent
@@ -166,7 +178,7 @@ kubectl port-forward pod/<pod name> 8001:8001 -n <namespace>
 With the port forward active, use the same `curl` commands as in the Quick Start section:
 
 ```bash
-curl -X POST http://localhost:8001/chat \
+curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What can you do?"}'
 ```
