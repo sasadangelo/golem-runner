@@ -1,11 +1,11 @@
 # Golem Runner — Roadmap
 
-> This roadmap covers the **golem-runner** component only.  
+> This roadmap covers the **golem-runner** component only.
 > For the full Golem platform roadmap see the [golem](https://github.com/sasadangelo/golem) repository.
 
 ---
 
-## MVP — Week 1  `June W1`
+## MVP — Week 1  `August W1`
 
 **Goal:** Build and validate the generic agent container in isolation.
 

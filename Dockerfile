@@ -17,11 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python dependencies
 # Build context is the repo root — pyproject.toml and uv.lock are here
 COPY pyproject.toml uv.lock ./
-RUN uv pip install --system --no-cache .
 
 # Copy the full repo layout (what is not needed is excluded via .dockerignore)
 COPY . .
 
-EXPOSE 8000
+# Install from lockfile so extras (e.g. pydantic-settings[yaml]) are respected
+RUN uv sync --system --no-dev --frozen
 
-CMD ["uvicorn", "main:app", "--app-dir", "/app/src/golem-runner", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8001
+
+CMD ["uvicorn", "main:app", "--app-dir", "/app/src/golem-runner", "--host", "0.0.0.0", "--port", "8001"]

@@ -16,6 +16,7 @@ Usage
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import Field, SecretStr
@@ -93,8 +94,8 @@ class Settings(BaseSettings):
     """Root configuration object. Import ``settings`` — never instantiate directly."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
-        yaml_file="config.yaml",
-        env_file=".env",
+        yaml_file=str(Path(__file__).parent.parent / "config.yaml"),
+        env_file=str(Path(__file__).parent.parent / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
