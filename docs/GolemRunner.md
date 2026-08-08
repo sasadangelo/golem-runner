@@ -19,7 +19,7 @@ The same image becomes a diagnostics agent, a code-writing assistant, or any oth
 ```
 src/golem-runner/
 ├── __init__.py
-├── main.py           # FastAPI server — /chat, /a2a/tasks/send, and /health endpoints
+├── main.py           # FastAPI server — /chat, /ws/chat, /a2a/tasks/send, and /health endpoints
 ├── agent.py          # LangGraph dynamic graph, built from settings at startup
 ├── config.yaml       # Non-secret runtime configuration (mounted at deploy time)
 ├── core/
@@ -90,7 +90,7 @@ settings.llm.api_key           # SecretStr, injected from WATSONX_API_KEY
 
 ---
 
-## HTTP API
+## API
 
 ### `GET /.well-known/agent.json`
 
@@ -103,7 +103,7 @@ A2A Agent Card — used by the Control Plane to register the agent and by peer a
   "description": "Generic automation agent powered by Golem.",
   "version": "0.1.0",
   "endpoint": "http://agent-001.sandbox.svc:8000",
-  "capabilities": { "streaming": false, "pushNotifications": false },
+  "capabilities": { "streaming": true, "pushNotifications": false },
   "skills": [{ "id": "bash", "name": "bash" }, { "id": "http_check", "name": "http_check" }]
 }
 ```
@@ -144,6 +144,27 @@ Human-facing chat endpoint.
 **Response**
 ```json
 { "reply": "The site is reachable. Status Code: 200 ..." }
+```
+
+### `WS /ws/chat`
+
+Human-facing streaming chat endpoint.
+
+**Protocol**
+- Client → runner: UTF-8 text containing the user message
+- Runner → client: UTF-8 text frames containing LLM chunks
+- Runner → client: `[DONE]` when the response is complete
+- Runner → client: `[ERROR] ...` if an exception occurs while processing the message
+
+**Manual test**
+```bash
+wscat -c ws://localhost:8000/ws/chat
+```
+
+Then send a plain text message such as:
+
+```text
+What can you do?
 ```
 
 ### `GET /health`

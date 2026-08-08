@@ -50,21 +50,28 @@ This loads the configuration from `src/golem-runner/config.yaml` and secrets fro
 
 ### 4. Chat with the agent
 
-You can send chat requests to the agent via HTTP POST.
+You can send chat requests to the agent via HTTP POST or WebSocket streaming.
 
-**Example A: Ask the agent what it can do**
+**Example A: Ask the agent what it can do over HTTP**
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What can you do?"}'
 ```
 
-**Example B: Ask the agent to inspect a website (triggers the `http_check` tool)**
+**Example B: Ask the agent to inspect a website over HTTP (triggers the `http_check` tool)**
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Check if https://google.com is reachable"}'
 ```
+
+**Example C: Stream a response over WebSocket**
+```bash
+wscat -c ws://localhost:8000/ws/chat
+```
+
+Then send a plain UTF-8 text message such as `What can you do?`. The server streams LLM chunks as text frames and ends the response with `[DONE]`.
 
 ---
 
@@ -224,13 +231,14 @@ Every `config.yaml` key can be overridden at runtime by the corresponding enviro
 
 ---
 
-## HTTP API
+## API
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/.well-known/agent.json` | A2A Agent Card |
 | `POST` | `/a2a/tasks/send` | Receive an A2A task from a peer agent |
-| `POST` | `/chat` | Human-facing chat endpoint |
+| `POST` | `/chat` | Human-facing synchronous chat endpoint |
+| `WS` | `/ws/chat` | Human-facing streaming chat endpoint |
 | `GET` | `/health` | Liveness probe |
 
 Full API reference: [docs/GolemRunner.md](docs/GolemRunner.md)
@@ -251,7 +259,7 @@ golem-runner/
 ├── .gitignore                    # Files excluded from version control
 ├── .secrets.baseline             # detect-secrets baseline (tolerated false positives)
 └── src/golem-runner/
-    ├── main.py                   # FastAPI server — /chat and /health endpoints
+    ├── main.py                   # FastAPI server — /chat, /ws/chat, /a2a/tasks/send, and /health endpoints
     ├── agent.py                  # LangGraph dynamic graph built from settings at startup
     ├── config.yaml               # Non-secret configuration (agent identity, model, skills)
     ├── .env.example              # Template for local secrets — copy to .env and fill in
