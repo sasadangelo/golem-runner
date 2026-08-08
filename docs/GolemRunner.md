@@ -1,7 +1,7 @@
 # Golem Runner — Agent Runner
 
 The Golem Runner is the **atomic execution unit** of the Golem platform.
-It is a single, generic Docker image that can be configured entirely at runtime via environment variables — no rebuild required.
+It is a single, generic Docker image that can be configured entirely at runtime — no rebuild required.
 
 See also: [Roadmap](Roadmap.md)
 
@@ -10,7 +10,7 @@ See also: [Roadmap](Roadmap.md)
 ## Purpose
 
 Each agent sandbox in Golem runs exactly one Agent Runner container.
-The same image becomes a diagnostics agent, a code-writing assistant, or any other specialised agent simply by changing two environment variables.
+The same image becomes a diagnostics agent, a code-writing assistant, or any other specialised agent simply by mounting a different `config.yaml` at container startup.
 
 ---
 
@@ -19,33 +19,67 @@ The same image becomes a diagnostics agent, a code-writing assistant, or any oth
 ```
 src/golem-runner/
 ├── __init__.py
-├── main.py           # FastAPI server — /chat and /health endpoints
-├── agent.py          # LangGraph dynamic graph, built from env vars at startup
+├── main.py           # FastAPI server — /chat, /a2a/tasks/send, and /health endpoints
+├── agent.py          # LangGraph dynamic graph, built from settings at startup
+├── config.yaml       # Non-secret runtime configuration (mounted at deploy time)
+├── core/
+│   └── config.py     # Pydantic Settings — merges config.yaml + WATSONX_API_KEY env var
 ├── tools/
 │   ├── __init__.py
 │   ├── system_tools.py   # Skill: execute_bash_command
 │   └── http_tools.py     # Skill: http_health_check
 ├── Dockerfile            # uv-based image, python:3.12-slim
 ├── pyproject.toml        # uv project dependencies
-└── .env.example          # Template for local runs
+└── .env.example          # Template for local secrets
 ```
 
 ---
 
-## Environment Variables
+## Configuration
 
-| Variable | Required | Default | Description |
-|---|:---:|---|---|
-| `WATSONX_API_KEY` | ✅ | — | IBM Cloud API key |
-| `WATSONX_URL` | ✅ | `https://us-south.ml.cloud.ibm.com` | WatsonX endpoint URL |
-| `WATSONX_PROJECT_ID` | ✅ | — | WatsonX project ID |
-| `WATSONX_MODEL_ID` | | `openai/gpt-oss-120b` | Model identifier |
-| `AGENT_ID` | | `golem-agent-<random>` | Unique agent identifier (used in Agent Card and routing) |
-| `AGENT_NAME` | | `"Golem Agent Runner"` | Human-readable agent name |
-| `AGENT_DESCRIPTION` | | `"Generic automation agent…"` | Agent description (used in Agent Card) |
-| `AGENT_ENDPOINT` | | `http://localhost:8000` | Public URL of this container (used in Agent Card) |
-| `SYSTEM_PROMPT` | | `"You are a helpful generic automation agent."` | Agent persona and instructions |
-| `ENABLED_SKILLS` | | `""` (no tools) | Comma-separated skill IDs to activate (see table below) |
+Configuration uses a **two-layer model** managed by `core/config.py` (Pydantic Settings):
+
+| Layer | Source | What goes here |
+|---|---|---|
+| Non-secret parameters | `config.yaml` (mounted into the container) | Agent identity, system prompt, enabled skills, LLM model/URL/project |
+| Secret credentials | `WATSONX_API_KEY` environment variable (single var) | IBM Cloud API key |
+
+### `config.yaml` reference
+
+```yaml
+agent:
+  id: "golem-agent-001"          # Unique identifier — used in the A2A Agent Card
+  name: "Golem Agent Runner"     # Human-readable agent name
+  description: "Generic automation agent powered by Golem."
+  endpoint: "http://localhost:8001"  # Public URL of this container
+  system_prompt: "You are a helpful generic automation agent."
+  enabled_skill: "bash,http_check"  # Comma-separated skill IDs to activate
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  url: "https://us-south.ml.cloud.ibm.com"
+  project_id: "<your-watsonx-project-id>"
+```
+
+### Secret environment variable
+
+| Variable | Required | Description |
+|---|:---:|---|
+| `WATSONX_API_KEY` | ✅ | IBM Cloud API key — the only secret the container needs |
+
+### Accessing settings in code
+
+```python
+from core.config import settings
+
+settings.agent.id
+settings.agent.system_prompt
+settings.agent.enabled_skill   # "bash,http_check"
+settings.llm.model
+settings.llm.api_key           # SecretStr, injected from WATSONX_API_KEY
+```
 
 ### Available Skills
 
@@ -127,24 +161,35 @@ Liveness probe.
 ### 1. Build the image
 
 ```bash
-docker build -t golem-runner:v1 src/golem-runner/
+docker build -t golem-runner:v1 .
 ```
 
-### 2. Run a diagnostics agent
+### 2. Create your local config and secrets
+
+Copy the example files and fill in your values:
+
+```bash
+cp src/golem-runner/config.yaml /tmp/agent-config.yaml   # edit as needed
+cp src/golem-runner/.env.example .env                     # add WATSONX_API_KEY
+```
+
+Edit `/tmp/agent-config.yaml` — set at least `llm.project_id` and customise
+`agent.system_prompt` / `agent.enabled_skill` for the scenario you want.
+
+### 3. Run a diagnostics agent
 
 ```bash
 docker run -d --name agent-test-1 \
   -p 8000:8000 \
+  -v /tmp/agent-config.yaml:/app/src/golem-runner/config.yaml:ro \
   -e WATSONX_API_KEY="your-ibm-cloud-api-key" \
-  -e WATSONX_URL="https://us-south.ml.cloud.ibm.com" \
-  -e WATSONX_PROJECT_ID="your-watsonx-project-id" \
-  -e WATSONX_MODEL_ID="openai/gpt-oss-120b" \
-  -e SYSTEM_PROMPT="You are a network diagnostics agent. Use your tools to verify and resolve issues." \
-  -e ENABLED_SKILLS="bash,http_check" \
   golem-runner:v1
 ```
 
-### 3. Test the agent
+The container inherits all non-secret parameters from the mounted `config.yaml`.
+The only environment variable required is `WATSONX_API_KEY`.
+
+### 4. Test the agent
 
 **Generic response:**
 ```bash
@@ -167,7 +212,7 @@ curl -X POST http://localhost:8000/chat \
   -d '{"message": "How many files are in the current directory and what is the container IP?"}'
 ```
 
-### 4. Cleanup
+### 5. Cleanup
 
 ```bash
 docker stop agent-test-1 && docker rm agent-test-1
@@ -179,7 +224,7 @@ docker stop agent-test-1 && docker rm agent-test-1
 
 1. Add a new `@tool`-decorated function in `tools/` (e.g. `tools/db_tools.py`).
 2. Register it in the `TOOL_REGISTRY` dict in [`agent.py`](../src/golem-runner/agent.py).
-3. Pass its key in `ENABLED_SKILLS` at runtime.
+3. Add its key to `agent.enabled_skill` in `config.yaml` at runtime.
 
 No code changes are needed in `main.py` or the Dockerfile.
 
@@ -188,5 +233,4 @@ No code changes are needed in `main.py` or the Dockerfile.
 ## Architecture Context
 
 In the full Golem platform the Agent Runner pod is spawned and configured by the **K8s Provisioner** (Week 2).
-The Control Plane injects `SYSTEM_PROMPT`, `ENABLED_SKILLS`, and `AGENT_ID` as Kubernetes Secret / ConfigMap values and enforces egress-only NetworkPolicy rules around the pod.
-
+The Control Plane mounts a per-agent `config.yaml` (via a Kubernetes ConfigMap) and injects `WATSONX_API_KEY` as a Kubernetes Secret into the pod. Egress-only NetworkPolicy rules are enforced around the pod.
