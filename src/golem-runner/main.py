@@ -11,7 +11,7 @@ from agent import agent_executor as agent_executor
 from core.config import settings
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel
 
 app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0")
@@ -127,10 +127,13 @@ async def chat(payload: ChatPayload) -> ChatResponse:
 @app.websocket(path="/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
     await websocket.accept()
+    history: list[BaseMessage] = []
     try:
         while True:
             user_message: str = await websocket.receive_text()
-            inputs: dict[str, list[HumanMessage]] = {"messages": [HumanMessage(content=user_message)]}
+            history.append(HumanMessage(content=user_message))
+            inputs: dict[str, list[BaseMessage]] = {"messages": history}
+            reply_tokens: list[str] = []
             try:
                 async for event in agent_executor.astream_events(inputs, version="v2"):
                     if event["event"] == "on_chat_model_stream":
@@ -139,9 +142,12 @@ async def ws_chat(websocket: WebSocket) -> None:
                             continue
                         token = chunk.content if hasattr(chunk, "content") else str(chunk)
                         if token:
+                            reply_tokens.append(token)
                             await websocket.send_text(token)
                 await websocket.send_text(data="[DONE]")
+                history.append(AIMessage(content="".join(reply_tokens)))
             except Exception as e:
+                history.pop()  # rimuove il HumanMessage se la risposta è fallita
                 await websocket.send_text(data=f"[ERROR] {e}")
     except WebSocketDisconnect:
         pass
