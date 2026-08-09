@@ -11,6 +11,26 @@ It is a single Docker image that can be turned into any specialised agent at run
 
 ---
 
+## Features
+
+| Feature | Status |
+|---|:---:|
+| Configurable AI agent — identity, system prompt, and skills set via `config.yaml`, no rebuild needed | ✅ |
+| LangGraph-based agentic loop with dynamic tool binding | ✅ |
+| In-memory conversation history — multi-turn context maintained across messages | ✅ |
+| WebSocket streaming endpoint (`/ws/chat`) — streams LLM tokens, terminates with `[DONE]` | ✅ |
+| Synchronous HTTP chat endpoint (`POST /chat`) | ✅ |
+| A2A Agent Card served at `/.well-known/agent.json` | ✅ |
+| A2A inbound task endpoint (`POST /a2a/tasks/send`) | ✅ |
+| Built-in tools: `bash` (shell commands) and `http_check` (HTTP health check) | ✅ |
+| Extensible tool catalogue — add a `@tool` function, register it, enable via config | ✅ |
+| Secrets via `.env` / environment variables, config via `config.yaml` (mount as ConfigMap) | ✅ |
+| Liveness probe (`GET /health`) | ✅ |
+| `AGENTS.md` injection — custom agent behavioural context at boot | 🔜 |
+| `SKILL.md` injection — lazy per-turn skill protocol injection | 🔜 |
+
+---
+
 ## Quick Start
 
 ### 1. Clone the repository
@@ -222,9 +242,9 @@ Every `config.yaml` key can be overridden at runtime by the corresponding enviro
 | `llm.project_id` | `PROJECT_ID` | WatsonX project ID |
 | `llm.model` | `MODEL` | Model identifier (e.g. `openai/gpt-oss-120b`) |
 
-### Available Skills
+### Available Tools
 
-| Skill ID | Function | Description |
+| Tool ID | Function | Description |
 |---|---|---|
 | `bash` | `execute_bash_command` | Runs a shell command; returns stdout/stderr |
 | `http_check` | `http_health_check` | HTTP GET to a URL; returns status code and body excerpt |
@@ -264,15 +284,15 @@ golem-runner/
     ├── config.yaml               # Non-secret configuration (agent identity, model, skills)
     ├── .env.example              # Template for local secrets — copy to .env and fill in
     ├── tools/
-    │   ├── system_tools.py       # Skill: execute_bash_command
-    │   └── http_tools.py         # Skill: http_health_check
+    │   ├── system_tools.py       # Tool: execute_bash_command
+    │   └── http_tools.py         # Tool: http_health_check
     └── core/
         └── config.py             # Pydantic Settings — merges config.yaml + env vars
 ```
 
 ---
 
-## Extending the Skill Catalogue
+## Extending the Tool Catalogue
 
 1. Add a new `@tool`-decorated function in `src/golem-runner/tools/` (e.g. `tools/db_tools.py`).
 2. Register it in the `TOOL_REGISTRY` dict in `agent.py`.
