@@ -4,8 +4,11 @@
 # -----------------------------------------------------------------------------
 """Golem Agent Runner — FastAPI application exposing A2A and chat endpoints."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from agent import agent_executor as agent_executor
 from core.config import settings
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -15,7 +18,6 @@ from pydantic import BaseModel
 
 from golem_agent_sdk.router import build_a2a_router
 
-app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0")
 
 # ---------------------------------------------------------------------------
 # A2A Agent Card — served at /.well-known/agent.json (A2A v1.0 spec)
@@ -35,6 +37,45 @@ AGENT_CARD: dict[str, Any] = {
     },
     "skills": [{"id": skill, "name": skill} for skill in _enabled_skills],
 }
+
+
+# ---------------------------------------------------------------------------
+# Startup handshake — register Agent Card with the Control Plane broker
+# ---------------------------------------------------------------------------
+
+
+async def _register_with_control_plane(card: dict[str, Any]) -> None:
+    """Push the Agent Card to the Control Plane via POST /agents/{id}/handshake.
+
+    Skipped silently when ``settings.agent.cp_url`` is empty (local dev mode).
+    Logs a warning on failure but never blocks the runner startup.
+
+    Args:
+        card: The full A2A Agent Card dict to register.
+    """
+    if not settings.agent.cp_url:
+        return
+    url = f"{settings.agent.cp_url.rstrip('/')}/agents/{settings.agent.id}/handshake"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, json={"card": card})
+            response.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        # Non-fatal: pull-based registration will still work via GET /status
+        import logging
+        logging.getLogger("runner.handshake").warning(
+            "Handshake with Control Plane failed (will rely on pull): %s", exc
+        )
+
+
+@asynccontextmanager
+async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
+    """FastAPI lifespan: call handshake on startup."""
+    await _register_with_control_plane(AGENT_CARD)
+    yield
+
+
+app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0", lifespan=lifespan)
 
 
 # Starlette blocks paths with dot-prefixed segments (e.g. /.well-known/) via its

@@ -52,12 +52,23 @@ _install_module_mocks()
 @pytest.fixture()
 def client() -> TestClient:
     """FastAPI TestClient with agent_executor replaced by a no-op mock and
-    TaskStore reset to empty state for each test."""
+    TaskStore reset to empty state for each test.
+
+    The lifespan handshake is bypassed by patching
+    ``main._register_with_control_plane`` to a no-op so tests never make
+    real HTTP calls to a Control Plane.
+    """
     # Ensure a fresh import of main for each fixture use
     for mod in ("agent", "main"):
         sys.modules.pop(mod, None)
 
-    with patch("agent.build_agent", return_value=MagicMock()):
+    async def _noop_handshake(*_a, **_kw):  # type: ignore[return]
+        pass
+
+    with (
+        patch("agent.build_agent", return_value=MagicMock()),
+        patch("main._register_with_control_plane", side_effect=_noop_handshake),
+    ):
         import main as m
 
         # Reset the shared TaskStore so tests are isolated from each other

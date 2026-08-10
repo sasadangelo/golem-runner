@@ -53,6 +53,11 @@ class AgentConfig(BaseSettings):
         default="bash,http_check",
         description="Comma-separated list of skills to enable (e.g. 'bash,http_check').",
     )
+    cp_url: str = Field(
+        default="",
+        description="Control Plane base URL for handshake registration (e.g. http://golem-cp:9000). "
+                    "Leave empty to skip handshake (useful for local dev without a Control Plane).",
+    )
 
 
 # ---------------------------------------------------------------------------

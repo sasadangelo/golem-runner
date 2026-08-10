@@ -12,3 +12,4 @@ llm:
   model: "openai/gpt-oss-120b"
   project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
   url: "https://us-south.ml.cloud.ibm.com"
+  cp_url: ""
