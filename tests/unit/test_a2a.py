@@ -2,7 +2,13 @@
 # Copyright (c) 2026 Salvatore D'Angelo, Code4Projects
 # Licensed under the MIT License. See LICENSE.md for details.
 # -----------------------------------------------------------------------------
-"""Unit tests for the A2A inbound task endpoint (POST /a2a/tasks/send)."""
+"""Unit tests for A2A task lifecycle endpoints.
+
+Covers:
+  - POST /a2a/tasks/send      happy path + error cases
+  - GET  /a2a/tasks/{task_id} lifecycle state after execution
+  - GET  /a2a/tasks           list all tasks
+"""
 
 from unittest.mock import MagicMock
 
@@ -24,6 +30,11 @@ def _send(client: TestClient, text: str, task_id: str | None = "task-001") -> Re
     if task_id is not None:
         payload["id"] = task_id
     return client.post("/a2a/tasks/send", json=payload)
+
+
+# ---------------------------------------------------------------------------
+# POST /a2a/tasks/send — happy path
+# ---------------------------------------------------------------------------
 
 
 def test_a2a_task_returns_completed(client: TestClient) -> None:
@@ -62,8 +73,13 @@ def test_a2a_task_artifact_contains_reply(client: TestClient) -> None:
     assert body["artifacts"][0]["parts"][0]["text"] == "Hello from agent"
 
 
+# ---------------------------------------------------------------------------
+# POST /a2a/tasks/send — error cases
+# ---------------------------------------------------------------------------
+
+
 def test_a2a_task_empty_parts_returns_400(client: TestClient) -> None:
-    """An A2A message with no text parts must return HTTP 400."""
+    """An A2A message with no parts must return HTTP 400."""
     resp = client.post(
         "/a2a/tasks/send",
         json={"id": "task-003", "message": {"role": "user", "parts": []}},
@@ -92,3 +108,74 @@ def test_a2a_task_executor_error_returns_500(client: TestClient) -> None:
     m.agent_executor = broken
     resp = _send(client, "Hi")
     assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# GET /a2a/tasks/{task_id} — lifecycle state after execution
+# ---------------------------------------------------------------------------
+
+
+def test_get_task_completed_after_send(client: TestClient) -> None:
+    """After a successful send, GET /a2a/tasks/{id} must return status=completed."""
+    import main as m
+
+    m.agent_executor = _executor("done")
+    _send(client, "Do something", task_id="task-lc-001")
+
+    resp = client.get("/a2a/tasks/task-lc-001")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["task_id"] == "task-lc-001"
+    assert body["status"] == "completed"
+    assert body["result"] == "done"
+    assert body["message"] == "Do something"
+
+
+def test_get_task_failed_after_executor_error(client: TestClient) -> None:
+    """After a failing send, GET /a2a/tasks/{id} must return status=failed."""
+    import main as m
+
+    broken = MagicMock()
+    broken.invoke.side_effect = RuntimeError("timeout")
+    m.agent_executor = broken
+
+    _send(client, "Risky op", task_id="task-lc-fail")
+
+    resp = client.get("/a2a/tasks/task-lc-fail")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert "timeout" in body["result"]
+
+
+def test_get_task_not_found_returns_404(client: TestClient) -> None:
+    """GET /a2a/tasks/{id} must return 404 for an unknown task ID."""
+    assert client.get("/a2a/tasks/does-not-exist").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /a2a/tasks — list all tasks
+# ---------------------------------------------------------------------------
+
+
+def test_list_tasks_returns_all(client: TestClient) -> None:
+    """GET /a2a/tasks must return all tasks submitted to this runner."""
+    import main as m
+
+    m.agent_executor = _executor("reply")
+
+    _send(client, "task A", task_id="task-list-1")
+    _send(client, "task B", task_id="task-list-2")
+
+    resp = client.get("/a2a/tasks")
+    assert resp.status_code == 200
+    ids = {t["task_id"] for t in resp.json()}
+    assert "task-list-1" in ids
+    assert "task-list-2" in ids
+
+
+def test_list_tasks_empty_initially(client: TestClient) -> None:
+    """GET /a2a/tasks must return an empty list when no tasks have been submitted."""
+    resp = client.get("/a2a/tasks")
+    assert resp.status_code == 200
+    assert resp.json() == []

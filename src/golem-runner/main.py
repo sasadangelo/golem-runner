@@ -4,7 +4,6 @@
 # -----------------------------------------------------------------------------
 """Golem Agent Runner — FastAPI application exposing A2A and chat endpoints."""
 
-import uuid
 from typing import Any
 
 from agent import agent_executor as agent_executor
@@ -13,6 +12,8 @@ from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSoc
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel
+
+from golem_agent_sdk.router import build_a2a_router
 
 app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0")
 
@@ -47,57 +48,21 @@ async def well_known_middleware(request: Request, call_next: Any) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# A2A inbound task endpoint  (A2A v1.0 — tasks/send)
+# A2A router — mounted from golem-agent-sdk
+#
+# The executor adapter bridges the LangGraph agent_executor (golem-framework
+# concern) to the plain callable interface expected by the SDK router.
 # ---------------------------------------------------------------------------
 
 
-class A2AMessage(BaseModel):
-    role: str
-    parts: list[dict[str, Any]]
+def _langgraph_executor(text: str) -> str:
+    """Adapter: wrap agent_executor.invoke() to match the SDK's str → str contract."""
+    inputs: dict[str, list[HumanMessage]] = {"messages": [HumanMessage(content=text)]}
+    result = agent_executor.invoke(inputs)
+    return str(result["messages"][-1].content)
 
 
-class A2ASendParams(BaseModel):
-    id: str | None = None
-    message: A2AMessage
-
-
-class A2ATaskResult(BaseModel):
-    id: str
-    status: dict[str, Any]
-    artifacts: list[dict[str, Any]]
-
-
-@app.post(path="/a2a/tasks/send", response_model=A2ATaskResult)
-async def a2a_tasks_send(params: A2ASendParams):
-    """
-    A2A inbound task reception.
-    Accepts a task delegated by a peer agent, runs it through the LangGraph loop,
-    and returns a completed artifact.
-    """
-    task_id: str = params.id or uuid.uuid4().hex
-
-    # Extract text from the first text part of the message
-    text = ""
-    for part in params.message.parts:
-        if part.get("type") == "text":
-            text = part.get("text", "")
-            break
-
-    if not text:
-        raise HTTPException(status_code=400, detail="No text part found in A2A message.")
-
-    try:
-        inputs: dict[str, list[HumanMessage]] = {"messages": [HumanMessage(content=text)]}
-        result = agent_executor.invoke(inputs)
-        reply: str = str(result["messages"][-1].content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-    return A2ATaskResult(
-        id=task_id,
-        status={"state": "completed"},
-        artifacts=[{"parts": [{"type": "text", "text": reply}]}],
-    )
+app.include_router(build_a2a_router(_langgraph_executor))
 
 
 # ---------------------------------------------------------------------------

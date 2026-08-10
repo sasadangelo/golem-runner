@@ -51,12 +51,17 @@ _install_module_mocks()
 
 @pytest.fixture()
 def client() -> TestClient:
-    """FastAPI TestClient with agent_executor replaced by a no-op mock."""
+    """FastAPI TestClient with agent_executor replaced by a no-op mock and
+    TaskStore reset to empty state for each test."""
     # Ensure a fresh import of main for each fixture use
     for mod in ("agent", "main"):
         sys.modules.pop(mod, None)
 
     with patch("agent.build_agent", return_value=MagicMock()):
         import main as m
+
+        # Reset the shared TaskStore so tests are isolated from each other
+        from golem_agent_sdk.router import task_store
+        task_store.clear()
 
         return TestClient(m.app)

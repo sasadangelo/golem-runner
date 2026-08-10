@@ -43,4 +43,4 @@ line-ending = "lf"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src/golem-runner"]
+pythonpath = ["src/golem-runner", "src/golem_agent_sdk", "src/golem_framework"]
