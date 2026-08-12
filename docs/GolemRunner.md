@@ -53,7 +53,7 @@ agent:
   description: "Generic automation agent powered by Golem."
   endpoint: "http://localhost:8001"  # Public URL of this container
   system_prompt: "You are a helpful generic automation agent."
-  enabled_skill: "bash,http_check"  # Comma-separated skill IDs to activate
+  enabled_skills: "bash,http_check"  # Comma-separated skill IDs to activate
 
 llm:
   provider: "watsonx"
@@ -76,9 +76,9 @@ from core.config import settings
 
 settings.agent.id
 settings.agent.system_prompt
-settings.agent.enabled_skill   # "bash,http_check"
+settings.agent.enabled_skills  # "bash,http_check"
 settings.llm.model
-settings.llm.api_key           # SecretStr, injected from WATSONX_API_KEY
+settings.llm.api_key  # SecretStr, injected from WATSONX_API_KEY
 ```
 
 ### Available Skills
@@ -195,7 +195,7 @@ cp src/golem-runner/.env.example .env                     # add WATSONX_API_KEY
 ```
 
 Edit `/tmp/agent-config.yaml` — set at least `llm.project_id` and customise
-`agent.system_prompt` / `agent.enabled_skill` for the scenario you want.
+`agent.system_prompt` / `agent.enabled_skills` for the scenario you want.
 
 ### 3. Run a diagnostics agent
 
@@ -245,7 +245,7 @@ docker stop agent-test-1 && docker rm agent-test-1
 
 1. Add a new `@tool`-decorated function in `tools/` (e.g. `tools/db_tools.py`).
 2. Register it in the `TOOL_REGISTRY` dict in [`agent.py`](../src/golem-runner/agent.py).
-3. Add its key to `agent.enabled_skill` in `config.yaml` at runtime.
+3. Add its key to `agent.enabled_skills` in `config.yaml` at runtime.
 
 No code changes are needed in `main.py` or the Dockerfile.
 

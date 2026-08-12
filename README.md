@@ -237,7 +237,7 @@ Every `config.yaml` key can be overridden at runtime by the corresponding enviro
 | `agent.description` | `AGENT_DESCRIPTION` | Short description shown in the A2A Agent Card |
 | `agent.endpoint` | `AGENT_ENDPOINT` | Public URL of this container |
 | `agent.system_prompt` | `AGENT_SYSTEM_PROMPT` | System prompt that defines the agent persona |
-| `agent.enabled_skill` | `AGENT_ENABLED_SKILL` | Comma-separated list of skill IDs to activate (e.g. `bash,http_check`) |
+| `agent.enabled_skills` | `AGENT_ENABLED_SKILLS` | Comma-separated list of skill IDs to activate (e.g. `bash,http_check`) |
 | `llm.url` | `URL` | WatsonX service URL |
 | `llm.project_id` | `PROJECT_ID` | WatsonX project ID |
 | `llm.model` | `MODEL` | Model identifier (e.g. `openai/gpt-oss-120b`) |
@@ -296,7 +296,7 @@ golem-runner/
 
 1. Add a new `@tool`-decorated function in `src/golem-runner/tools/` (e.g. `tools/db_tools.py`).
 2. Register it in the `TOOL_REGISTRY` dict in `agent.py`.
-3. Add its key to `config.yaml` under `agent.enabled_skill`.
+3. Add its key to `config.yaml` under `agent.enabled_skills`.
 
 No changes to `main.py` or the Dockerfile are needed.
 

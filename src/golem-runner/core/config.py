@@ -49,14 +49,14 @@ class AgentConfig(BaseSettings):
         default="You are a helpful generic automation agent.",
         description="System prompt that defines the agent persona.",
     )
-    enabled_skill: str = Field(
+    enabled_skills: str = Field(
         default="bash,http_check",
         description="Comma-separated list of skills to enable (e.g. 'bash,http_check').",
     )
     cp_url: str = Field(
         default="",
         description="Control Plane base URL for handshake registration (e.g. http://golem-cp:9000). "
-                    "Leave empty to skip handshake (useful for local dev without a Control Plane).",
+        "Leave empty to skip handshake (useful for local dev without a Control Plane).",
     )
 
 

@@ -4,7 +4,7 @@ agent:
   description: "Generic automation agent powered by Golem."
   endpoint: "http://localhost:8001"
   system_prompt: "You are a helpful generic automation agent."
-  enabled_skill: "bash,http_check"
+  enabled_skills: "bash,http_check"
 
 llm:
   provider: "watsonx"

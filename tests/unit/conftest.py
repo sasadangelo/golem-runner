@@ -73,6 +73,7 @@ def client() -> TestClient:
 
         # Reset the shared TaskStore so tests are isolated from each other
         from golem_agent_sdk.router import task_store
+
         task_store.clear()
 
         return TestClient(m.app)

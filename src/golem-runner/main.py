@@ -18,12 +18,11 @@ from pydantic import BaseModel
 
 from golem_agent_sdk.router import build_a2a_router
 
-
 # ---------------------------------------------------------------------------
 # A2A Agent Card — served at /.well-known/agent.json (A2A v1.0 spec)
 # ---------------------------------------------------------------------------
 
-_enabled_skills: list[str] = [s.strip() for s in settings.agent.enabled_skill.split(",") if s.strip()]
+_enabled_skills: list[str] = [s.strip() for s in settings.agent.enabled_skills.split(",") if s.strip()]
 
 AGENT_CARD: dict[str, Any] = {
     "id": settings.agent.id,
@@ -63,6 +62,7 @@ async def _register_with_control_plane(card: dict[str, Any]) -> None:
     except Exception as exc:  # noqa: BLE001
         # Non-fatal: pull-based registration will still work via GET /status
         import logging
+
         logging.getLogger("runner.handshake").warning(
             "Handshake with Control Plane failed (will rely on pull): %s", exc
         )
