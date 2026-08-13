@@ -1,8 +1,9 @@
 # Golem Demo — Aria, the SRE Agent
 
-**Audience:** technical or semi-technical stakeholders.  
-**Duration:** ~5 minutes.  
-**What it shows:** deploy a specialised agent from the CLI in seconds, then have a natural conversation that uses real tools inside a live Kubernetes pod.
+**Audience:** technical or semi-technical stakeholders.
+**Duration:** ~7 minutes.
+**What it shows:** deploy a specialised agent from the CLI in seconds, then have a natural
+conversation that uses real tools — including live Kubernetes cluster inspection via MCP.
 
 ---
 
@@ -11,6 +12,7 @@
 ```bash
 # Control Plane running on minikube
 minikube start
+
 # (deploy golem-control-plane — e.g. via app.sh or kubectl apply)
 
 # CLI configured
@@ -22,14 +24,35 @@ golem cp use --name minikube
 
 ---
 
-## Step 1 — Deploy the agent (10 seconds)
+## Step 1 — Deploy the kubernetes-mcp-server (once per cluster)
+
+```bash
+helm upgrade -i -n kubernetes-mcp-server --create-namespace kubernetes-mcp-server \
+  oci://ghcr.io/containers/charts/kubernetes-mcp-server \
+  -f examples/demo-sre/mcp/values.yaml
+```
+
+Wait for the MCP server to be ready:
+```bash
+kubectl rollout status -n kubernetes-mcp-server deployment/kubernetes-mcp-server
+```
+
+The server will be reachable at:
+```
+http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080
+```
+
+---
+
+## Step 2 — Deploy the agent (10 seconds)
 
 ```bash
 golem agent create \
-  --config  examples/demo-sre/config.yaml \
+  --config   examples/demo-sre/config.yaml \
   --agents-md examples/demo-sre/AGENTS.md \
-  --skill   examples/demo-sre/check-health.md \
-  --skill   examples/demo-sre/inspect-env.md
+  --skill    examples/demo-sre/check-health.md \
+  --skill    examples/demo-sre/inspect-env.md \
+  --skill    examples/demo-sre/inspect-k8s.md
 ```
 
 Expected output:
@@ -45,7 +68,7 @@ golem agent status --id aria-sre-001
 
 ---
 
-## Step 2 — Open a chat session
+## Step 3 — Open a chat session
 
 ```bash
 golem chat --id aria-sre-001
@@ -53,49 +76,60 @@ golem chat --id aria-sre-001
 
 ---
 
-## Demo conversation (copy-paste these lines one at a time)
+## Demo conversation
 
-### Intro — show the agent knows who it is
+### Intro — the agent knows who it is and what tools it has
 ```
 Who are you and what can you do?
 ```
-> Aria introduces herself, lists her tools, and explains her role.
+> Aria introduces herself, lists her tools including Kubernetes inspection via MCP.
 
 ---
 
-### Live HTTP health check — audience sees a real tool call
+### Live HTTP health check
 ```
 Check if https://google.com is reachable and give me a structured report.
 ```
-> Aria calls `http_check`, interprets the status code, and returns a formatted report.
+> Aria calls `http_check`, interprets the status code, returns a formatted report.
 
 ---
 
-### Internal cluster check — shows cluster-internal networking
-```
-Probe the runner's own health endpoint and tell me if this pod is healthy.
-```
-> Aria calls `http_check` on `http://localhost:8000/health` — proves it's running inside the pod.
-
----
-
-### Container introspection — the "wow moment"
+### Container introspection
 ```
 Give me a full environment report of this container: resources, mounted files, running processes.
 ```
-> Aria runs a series of bash commands, redacts secrets automatically, and returns a structured Markdown report showing:
-> - hostname, kernel, OS
-> - CPU / memory / disk
-> - what's mounted at `/app` (config.yaml, AGENTS.md, skill files)
-> - running processes
+> Aria runs bash commands and returns a structured Markdown report.
 
 ---
 
-### Multi-step diagnostic — shows autonomous reasoning
+### Kubernetes inspection — the new "wow moment"
 ```
-Something might be wrong with IBM WatsonX connectivity. Check if https://us-south.ml.cloud.ibm.com is reachable from this pod, then check disk space and memory, and summarise whether this pod is healthy enough to serve production traffic.
+List all pods across all namespaces and tell me if anything is failing.
 ```
-> Aria makes multiple tool calls, synthesises the results, and produces a final yes/no verdict with evidence.
+> Aria calls MCP kubernetes tools (`list_pods`), scans all namespaces, identifies any
+> pods in `Pending`, `CrashLoopBackOff`, or `Error` state, and returns a structured report.
+
+---
+
+### Cross-tool multi-step diagnostic
+```
+The golem-control-plane namespace might have issues. Check the pod statuses there,
+look for any warning events, and also verify the control plane HTTP endpoint is reachable.
+```
+> Aria:
+> 1. Calls MCP `list_pods` for the `golem-control-plane` namespace
+> 2. Calls MCP `list_events` for the same namespace
+> 3. Calls `http_check` on the control plane endpoint
+> 4. Synthesises all results into a single incident report
+
+---
+
+### Cluster overview
+```
+Give me a full cluster health report: namespaces, deployments, any failing workloads.
+```
+> Aria calls `list_namespaces`, `list_deployments` across namespaces, correlates with
+> events, and produces a complete cluster health summary.
 
 ---
 
@@ -103,6 +137,9 @@ Something might be wrong with IBM WatsonX connectivity. Check if https://us-sout
 
 ```bash
 golem agent delete --id aria-sre-001
+
+# Optional: remove the MCP server
+helm uninstall -n kubernetes-mcp-server kubernetes-mcp-server
 ```
 
 ---
@@ -111,9 +148,9 @@ golem agent delete --id aria-sre-001
 
 | What the audience sees | What it demonstrates |
 |---|---|
-| One CLI command deploys a specialised agent | AGENTS.md + SKILL.md = zero rebuild, zero redeploy of the image |
-| Agent greets with its exact persona | AGENTS.md injected into system prompt at boot |
-| Structured Markdown reports every time | SKILL.md makes behaviour repeatable, not improvised |
-| Live tool calls with real output | Tools run inside an isolated K8s pod — not a simulation |
-| Secrets automatically redacted | The agent follows its constraints from AGENTS.md |
+| One CLI command deploys a specialised agent | AGENTS.md + SKILL.md = zero rebuild |
+| Agent greets with its exact persona | AGENTS.md injected at boot |
+| Structured Markdown reports every time | SKILL.md makes behaviour repeatable |
+| Live Kubernetes queries — pods, events, deployments | MCP tools connected at boot via `mcp_servers` in config.yaml |
+| Multi-tool cross-correlation | HTTP check + K8s events in one response |
 | `golem agent delete` tears it all down | Full sandbox lifecycle in seconds |

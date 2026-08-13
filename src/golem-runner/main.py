@@ -4,19 +4,57 @@
 # -----------------------------------------------------------------------------
 """Golem Agent Runner — FastAPI application exposing A2A and chat endpoints."""
 
+import logging
+import logging.config
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from agent import agent_executor as agent_executor
+from agent import build_agent
 from core.config import settings
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.tools import BaseTool
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 from golem_agent_sdk.router import build_a2a_router
+
+# ---------------------------------------------------------------------------
+# Logging — configure all runner.* loggers to appear in stdout alongside uvicorn
+# ---------------------------------------------------------------------------
+
+logging.config.dictConfig(
+    {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(levelname)s:     %(name)s - %(message)s",
+            },
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "loggers": {
+            "runner": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        },
+    }
+)
+
+logger = logging.getLogger("runner.main")
+
+# ---------------------------------------------------------------------------
+# LangGraph recursion limit — max tool-call hops per turn
+# ---------------------------------------------------------------------------
+
+_RECURSION_LIMIT: int = 50
 
 # ---------------------------------------------------------------------------
 # A2A Agent Card — served at /.well-known/agent.json (A2A v1.0 spec)
@@ -48,9 +86,6 @@ async def _register_with_control_plane(card: dict[str, Any]) -> None:
 
     Skipped silently when ``settings.agent.cp_url`` is empty (local dev mode).
     Logs a warning on failure but never blocks the runner startup.
-
-    Args:
-        card: The full A2A Agent Card dict to register.
     """
     if not settings.agent.cp_url:
         return
@@ -59,18 +94,72 @@ async def _register_with_control_plane(card: dict[str, Any]) -> None:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(url, json={"card": card})
             response.raise_for_status()
+        logger.info("Handshake completed with Control Plane at %s", settings.agent.cp_url)
     except Exception as exc:  # noqa: BLE001
-        # Non-fatal: pull-based registration will still work via GET /status
-        import logging
+        logger.warning("Handshake with Control Plane failed (will rely on pull): %s", exc)
 
-        logging.getLogger("runner.handshake").warning(
-            "Handshake with Control Plane failed (will rely on pull): %s", exc
+
+# ---------------------------------------------------------------------------
+# MCP tool loading — connect to all configured MCP servers at boot
+# ---------------------------------------------------------------------------
+
+
+async def _load_mcp_tools() -> list[BaseTool]:
+    """Connect to each MCP server URI in ``settings.agent.mcp_servers`` and
+    collect their tools.
+
+    Returns an empty list when no MCP servers are configured or when all
+    servers are unreachable (failures are logged as warnings).
+    """
+    mcp_logger = logging.getLogger("runner.mcp")
+
+    uris = settings.agent.mcp_servers
+    if not uris:
+        mcp_logger.info("No MCP servers configured — starting with built-in tools only")
+        return []
+
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+
+    connections: dict[str, Any] = {
+        f"mcp_{i}": {"url": uri, "transport": "streamable_http"}
+        for i, uri in enumerate(uris)
+    }
+
+    mcp_logger.info("Connecting to %d MCP server(s): %s", len(uris), uris)
+
+    tools: list[BaseTool] = []
+    try:
+        mcp_client = MultiServerMCPClient(connections)
+        tools = await mcp_client.get_tools()
+        mcp_logger.info(
+            "Loaded %d MCP tool(s) from %d server(s): %s",
+            len(tools),
+            len(uris),
+            [t.name for t in tools],
         )
+    except Exception as exc:  # noqa: BLE001
+        mcp_logger.warning("Failed to load MCP tools (runner will start without them): %s", exc)
+
+    return tools
+
+
+# ---------------------------------------------------------------------------
+# Lifespan: MCP boot + handshake
+# ---------------------------------------------------------------------------
+
+# Module-level reference; set during lifespan so all endpoint handlers share it.
+agent_executor: CompiledStateGraph | None = None
 
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
-    """FastAPI lifespan: call handshake on startup."""
+    """FastAPI lifespan: load MCP tools, compile agent, then call handshake."""
+    global agent_executor  # noqa: PLW0603
+
+    mcp_tools = await _load_mcp_tools()
+    agent_executor = build_agent(mcp_tools=mcp_tools)
+    logger.info("Agent compiled — built-in tools + %d MCP tool(s)", len(mcp_tools))
+
     await _register_with_control_plane(AGENT_CARD)
     yield
 
@@ -78,8 +167,6 @@ async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
 app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0", lifespan=lifespan)
 
 
-# Starlette blocks paths with dot-prefixed segments (e.g. /.well-known/) via its
-# routing internals, so we intercept the request with a middleware before routing.
 @app.middleware(middleware_type="http")
 async def well_known_middleware(request: Request, call_next: Any) -> Response:
     """Serve /.well-known/agent.json before Starlette routing drops the request."""
@@ -89,17 +176,15 @@ async def well_known_middleware(request: Request, call_next: Any) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# A2A router — mounted from golem-agent-sdk
-#
-# The executor adapter bridges the LangGraph agent_executor (golem-framework
-# concern) to the plain callable interface expected by the SDK router.
+# A2A router
 # ---------------------------------------------------------------------------
 
 
 def _langgraph_executor(text: str) -> str:
     """Adapter: wrap agent_executor.invoke() to match the SDK's str → str contract."""
+    assert agent_executor is not None, "agent_executor not initialised"  # noqa: S101
     inputs: dict[str, list[HumanMessage]] = {"messages": [HumanMessage(content=text)]}
-    result = agent_executor.invoke(inputs)
+    result = agent_executor.invoke(inputs, config={"recursion_limit": _RECURSION_LIMIT})
     return str(result["messages"][-1].content)
 
 
@@ -107,7 +192,7 @@ app.include_router(build_a2a_router(_langgraph_executor))
 
 
 # ---------------------------------------------------------------------------
-# Chat endpoint (human-facing)
+# Chat endpoints
 # ---------------------------------------------------------------------------
 
 
@@ -121,9 +206,10 @@ class ChatResponse(BaseModel):
 
 @app.post(path="/chat", response_model=ChatResponse)
 async def chat(payload: ChatPayload) -> ChatResponse:
+    assert agent_executor is not None, "agent_executor not initialised"  # noqa: S101
     try:
         inputs: dict[str, list[HumanMessage]] = {"messages": [HumanMessage(content=payload.message)]}
-        result = agent_executor.invoke(inputs)
+        result = agent_executor.invoke(inputs, config={"recursion_limit": _RECURSION_LIMIT})
         last_message = result["messages"][-1]
         return ChatResponse(reply=str(last_message.content))
     except Exception as e:
@@ -132,17 +218,29 @@ async def chat(payload: ChatPayload) -> ChatResponse:
 
 @app.websocket(path="/ws/chat")
 async def ws_chat(websocket: WebSocket) -> None:
+    assert agent_executor is not None, "agent_executor not initialised"  # noqa: S101
     await websocket.accept()
     history: list[BaseMessage] = []
     try:
         while True:
             user_message: str = await websocket.receive_text()
+            logger.info("WS chat message received (%d chars)", len(user_message))
             history.append(HumanMessage(content=user_message))
             inputs: dict[str, list[BaseMessage]] = {"messages": history}
             reply_tokens: list[str] = []
             try:
-                async for event in agent_executor.astream_events(inputs, version="v2"):
-                    if event["event"] == "on_chat_model_stream":
+                async for event in agent_executor.astream_events(
+                    inputs,
+                    version="v2",
+                    config={"recursion_limit": _RECURSION_LIMIT},
+                ):
+                    kind = event["event"]
+                    if kind == "on_tool_start":
+                        logger.info("Tool call: %s  args=%s", event["name"], event["data"].get("input"))
+                    elif kind == "on_tool_end":
+                        output = str(event["data"].get("output", ""))[:200]
+                        logger.info("Tool result: %s  → %s", event["name"], output)
+                    elif kind == "on_chat_model_stream":
                         chunk = event["data"].get("chunk")
                         if chunk is None:
                             continue
@@ -152,11 +250,13 @@ async def ws_chat(websocket: WebSocket) -> None:
                             await websocket.send_text(token)
                 await websocket.send_text(data="[DONE]")
                 history.append(AIMessage(content="".join(reply_tokens)))
+                logger.info("Turn complete — %d tokens streamed", len(reply_tokens))
             except Exception as e:
-                history.pop()  # rimuove il HumanMessage se la risposta è fallita
+                history.pop()
                 await websocket.send_text(data=f"[ERROR] {e}")
+                logger.error("Agent error during turn: %s", e)
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket disconnected")
 
 
 @app.get(path="/health")

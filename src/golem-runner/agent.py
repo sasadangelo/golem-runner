@@ -31,7 +31,7 @@ from typing_extensions import TypedDict
 
 logger = logging.getLogger("runner.agent")
 
-# Central registry of available skills
+# Central registry of available built-in skills
 TOOL_REGISTRY: dict[str, BaseTool] = {
     "bash": execute_bash_command,
     "http_check": http_health_check,
@@ -121,7 +121,15 @@ def _build_system_prompt(base_prompt: str, turn_messages: list[BaseMessage]) -> 
     return "\n\n".join(parts)
 
 
-def build_agent() -> CompiledStateGraph:
+def build_agent(mcp_tools: list[BaseTool] | None = None) -> CompiledStateGraph:
+    """Compile the LangGraph ReAct agent.
+
+    Args:
+        mcp_tools: Optional list of LangChain tools obtained from MCP servers at
+                   boot time (loaded asynchronously in ``main.lifespan`` via
+                   ``MultiServerMCPClient``).  Combined with the statically
+                   configured built-in tools from ``TOOL_REGISTRY``.
+    """
     base_prompt = settings.agent.system_prompt
     enabled_skills_env = settings.agent.enabled_skills  # e.g. "bash,http_check"
 
@@ -130,6 +138,11 @@ def build_agent() -> CompiledStateGraph:
         for key in (s.strip() for s in enabled_skills_env.split(",") if s.strip()):
             if key in TOOL_REGISTRY:
                 selected_tools.append(TOOL_REGISTRY[key])
+
+    # Append MCP tools after the built-in ones so they are always available.
+    if mcp_tools:
+        selected_tools.extend(mcp_tools)
+        logger.info("Registered %d MCP tool(s): %s", len(mcp_tools), [t.name for t in mcp_tools])
 
     llm = ChatWatsonx(
         model_id=settings.llm.model,
@@ -168,7 +181,3 @@ def build_agent() -> CompiledStateGraph:
         builder.add_edge("agent", END)
 
     return builder.compile()
-
-
-# Compiled graph — instantiated once at container startup
-agent_executor = build_agent()

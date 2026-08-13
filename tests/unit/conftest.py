@@ -5,12 +5,13 @@
 """Shared pytest fixtures for unit tests.
 
 Mocks all heavy third-party modules (langchain_ibm, langchain_core LLM classes,
-langgraph) before any source module is imported, so tests run without credentials
-and without installing the full golem-runner dependency tree.
+langgraph, langchain_mcp_adapters) before any source module is imported, so
+tests run without credentials and without installing the full golem-runner
+dependency tree.
 """
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,6 +26,8 @@ def _install_module_mocks() -> None:
         "langgraph.graph.message",
         "langgraph.graph.state",
         "langgraph.prebuilt",
+        "langchain_mcp_adapters",
+        "langchain_mcp_adapters.client",
         "dotenv",
     ]
     for name in stubs:
@@ -45,6 +48,16 @@ def _install_module_mocks() -> None:
     # langgraph.prebuilt must expose ToolNode
     sys.modules["langgraph.prebuilt"].ToolNode = MagicMock()  # type: ignore[attr-defined]
 
+    # langchain_mcp_adapters.client must expose MultiServerMCPClient as an
+    # async context manager that returns no tools
+    mock_mcp_client = MagicMock()
+    mock_mcp_client.__aenter__ = AsyncMock(return_value=mock_mcp_client)
+    mock_mcp_client.__aexit__ = AsyncMock(return_value=False)
+    mock_mcp_client.get_tools = AsyncMock(return_value=[])
+    sys.modules["langchain_mcp_adapters.client"].MultiServerMCPClient = MagicMock(  # type: ignore[attr-defined]
+        return_value=mock_mcp_client
+    )
+
 
 _install_module_mocks()
 
@@ -54,19 +67,24 @@ def client() -> TestClient:
     """FastAPI TestClient with agent_executor replaced by a no-op mock and
     TaskStore reset to empty state for each test.
 
-    The lifespan handshake is bypassed by patching
-    ``main._register_with_control_plane`` to a no-op so tests never make
-    real HTTP calls to a Control Plane.
+    The lifespan is simplified by patching:
+    - ``main._load_mcp_tools`` → returns [] (no real MCP connections)
+    - ``agent.build_agent`` → returns a MagicMock compiled graph
+    - ``main._register_with_control_plane`` → no-op (no real HTTP calls)
     """
-    # Ensure a fresh import of main for each fixture use
+    # Ensure a fresh import of main and agent for each fixture use
     for mod in ("agent", "main"):
         sys.modules.pop(mod, None)
 
-    async def _noop_handshake(*_a, **_kw):  # type: ignore[return]
+    async def _noop_handshake(*_a: object, **_kw: object) -> None:
         pass
+
+    async def _noop_load_mcp_tools(*_a: object, **_kw: object) -> list:
+        return []
 
     with (
         patch("agent.build_agent", return_value=MagicMock()),
+        patch("main._load_mcp_tools", side_effect=_noop_load_mcp_tools),
         patch("main._register_with_control_plane", side_effect=_noop_handshake),
     ):
         import main as m

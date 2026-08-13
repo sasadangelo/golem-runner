@@ -1,0 +1,40 @@
+# kubernetes-mcp-server Helm values for Golem demo-sre
+#
+# Deploy with:
+#   helm upgrade -i -n kubernetes-mcp-server --create-namespace kubernetes-mcp-server \
+#     oci://ghcr.io/containers/charts/kubernetes-mcp-server \
+#     -f examples/demo-sre/mcp/values.yaml
+
+# No Ingress needed — the runner accesses the server via ClusterIP DNS.
+ingress:
+  enabled: false
+
+# ClusterIP on port 8080 (default) — reachable at:
+#   http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080
+service:
+  type: ClusterIP
+  port: 8080
+
+# ServiceAccount + RBAC created automatically by the chart.
+# The ServiceAccount token is auto-mounted so the server uses in-cluster config.
+serviceAccount:
+  create: true
+  automountToken: true
+
+rbac:
+  create: true
+  # Bind to the built-in 'view' ClusterRole — read-only access to pods,
+  # deployments, services, events, configmaps, namespaces.
+  extraClusterRoleBindings:
+    - name: bind-view
+      roleRef:
+        name: view
+        external: true
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
