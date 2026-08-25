@@ -1,0 +1,28 @@
+# Demo Doc Agent — "Gianluca"
+# Deploy with:
+#   # Step 1 — deploy the llmwiki stack (MCP + API + UI, once per cluster)
+#   examples/demo-doc/mcp/llmwiki/deploy.sh
+#
+#   # Step 2 — deploy the agent
+#   examples/demo-doc/deploy.sh
+
+agent:
+  id: "demo-doc-001"
+  name: "Gianluca — Document Knowledge Assistant"
+  description: "Knowledge-base assistant. Ingests documents (PDFs, notes, web pages), organises them into a structured wiki, and answers questions with citations."
+  endpoint: "http://demo-doc-001.default.svc.cluster.local:8000"
+  system_prompt: "You are Gianluca, a knowledge-base assistant. You help users build and maintain a personal wiki from their documents. Start every new session by calling the guide tool to see the available knowledge bases. When the user uploads or references a document, ingest it into the wiki, create or update concept and entity pages, and keep the overview up to date. Always cite your sources."
+  mcp_servers:
+    - url: "http://llmwiki-mcp.default.svc.cluster.local:8080/mcp"
+  # The API is available inside the cluster at:
+  #   http://llmwiki-api.default.svc.cluster.local:8000
+  # The UI is accessible from your laptop via:
+  #   kubectl port-forward svc/llmwiki-web 3000:3000  →  http://localhost:3000
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
+  url: "https://us-south.ml.cloud.ibm.com"
+  max_new_tokens: 8192

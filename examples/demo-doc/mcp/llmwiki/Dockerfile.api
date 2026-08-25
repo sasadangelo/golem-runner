@@ -1,0 +1,43 @@
+# Dockerfile for the llmwiki API running in LOCAL mode.
+#
+# Built from the upstream api/ directory of the llmwiki project:
+#   /Users/sasadangelo/github.com/lucasastorian/llmwiki/api
+#
+# Local mode uses SQLite + filesystem instead of Postgres + S3.
+# No auth is required — a fixed single-user identity is used.
+# The workspace is shared with the MCP server via a common PVC/emptyDir.
+
+FROM python:3.11-slim-bookworm AS base
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+RUN pip install --no-cache-dir uv
+
+COPY requirements.lock .
+RUN uv pip install --system --require-hashes -r requirements.lock
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+FROM base AS runtime
+
+COPY . .
+
+# The deploy.sh stages shared/ and the llmwiki CLI alongside api/ in the build
+# context.  Place them where the CLI expects: /llmwiki/{shared,llmwiki,...}
+# sqlite.py in the API resolves: Path(__file__).parent.parent.parent.parent / "shared"
+# i.e. /app/infra/db/sqlite.py → /app/infra/db → /app/infra → /app → / → /shared
+RUN ln -sf /app/shared /shared
+
+RUN mkdir -p /workspace /llmwiki
+# llmwiki CLI and shared schema are copied into the build context by deploy.sh
+RUN if [ -f /app/llmwiki ]; then cp /app/llmwiki /llmwiki/llmwiki && chmod +x /llmwiki/llmwiki; fi
+RUN if [ -d /app/shared ]; then cp -r /app/shared /llmwiki/shared; fi
+
+ENV MODE=local \
+    WORKSPACE_PATH=/workspace \
+    API_URL=http://llmwiki-api.default.svc.cluster.local:8000 \
+    APP_URL=http://llmwiki-web.default.svc.cluster.local:3000
+
+EXPOSE 8000
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-graceful-shutdown 30

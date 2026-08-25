@@ -1,0 +1,82 @@
+# Helm values for the llmwiki backend (bjw-s/app-template).
+#
+# Single Deployment with two containers sharing an emptyDir at /workspace:
+#   - api  : REST API  (port 8000) — document upload endpoint for the UI
+#   - mcp  : MCP server (port 8080) — tools for the Gianluca agent
+#
+# initContainer: runs `python llmwiki init /workspace` using the upstream CLI
+# to create the SQLite DB with exactly the right schema before either main
+# container starts.  This avoids any schema mismatch between mcp and api.
+#
+# Data lives for the lifetime of the pod — sufficient for a local demo.
+
+controllers:
+  llmwiki:
+    type: deployment
+    replicas: 1
+    initContainers:
+      init-db:
+        image:
+          repository: localhost/llmwiki-api
+          tag: latest
+          pullPolicy: IfNotPresent
+        env:
+          MODE: "local"
+          WORKSPACE_PATH: "/workspace"
+        command: ["python3", "/llmwiki/llmwiki", "init", "/workspace"]
+
+    containers:
+      api:
+        image:
+          repository: localhost/llmwiki-api
+          tag: latest
+          pullPolicy: IfNotPresent
+        env:
+          PORT: "8000"
+          MODE: "local"
+          WORKSPACE_PATH: "/workspace"
+          API_URL: "http://llmwiki.default.svc.cluster.local:8000"
+          APP_URL: "http://localhost:3000"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+      mcp:
+        image:
+          repository: localhost/llmwiki-mcp
+          tag: latest
+          pullPolicy: IfNotPresent
+        env:
+          PORT: "8080"
+          MODE: "local"
+          WORKSPACE_PATH: "/workspace"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+service:
+  api:
+    controller: llmwiki
+    ports:
+      http:
+        port: 8000
+  mcp:
+    controller: llmwiki
+    ports:
+      http:
+        port: 8080
+
+persistence:
+  workspace:
+    enabled: true
+    type: emptyDir
+    globalMounts:
+      - path: /workspace
