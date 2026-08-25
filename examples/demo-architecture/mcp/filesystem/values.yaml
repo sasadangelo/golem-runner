@@ -1,0 +1,39 @@
+# values.yaml
+controllers:
+  filesystem-mcp:
+    type: deployment
+    replicas: 1
+    containers:
+      main:
+        image:
+          repository: localhost/mcp-filesystem-http
+          tag: latest
+          pullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+service:
+  main:
+    controller: filesystem-mcp
+    ports:
+      http:
+        port: 8000
+
+persistence:
+  data:
+    enabled: true
+    type: configMap
+    name: demo-architecture-files
+    globalMounts:
+      - path: /data
+        readOnly: true
+  tri-output:
+    enabled: true
+    type: emptyDir
+    globalMounts:
+      - path: /data/tri-output

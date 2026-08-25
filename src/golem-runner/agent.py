@@ -149,6 +149,7 @@ def build_agent(mcp_tools: list[BaseTool] | None = None) -> CompiledStateGraph:
         url=SecretStr(settings.llm.url),
         project_id=settings.llm.project_id,
         api_key=settings.llm.api_key,
+        params={"max_tokens": settings.llm.max_new_tokens},
     )
 
     if selected_tools:

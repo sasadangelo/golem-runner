@@ -1,0 +1,24 @@
+# Demo SRE Agent — "Fabio"
+# Deploy with:
+#   # Step 1 — deploy kubernetes-mcp-server (once per cluster)
+#   examples/demo-sre/mcp/kubernetes/deploy.sh
+#
+#   # Step 2 — deploy the agent
+#   examples/demo-sre/deploy.sh
+
+agent:
+  id: "demo-sre-001"
+  name: "Fabio — SRE Agent"
+  description: "Senior SRE agent. Probes HTTP endpoints, inspects container environment, queries the Kubernetes cluster via MCP, produces structured incident reports."
+  endpoint: "http://demo-sre-001.svc.cluster.local:8000"
+  system_prompt: "You are Fabio, a senior Site Reliability Engineer. You use your tools methodically and produce structured, Markdown-formatted reports."
+  enabled_skills: "bash,http_check"
+  mcp_servers:
+    - url: "http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080/mcp"
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
+  url: "https://us-south.ml.cloud.ibm.com"

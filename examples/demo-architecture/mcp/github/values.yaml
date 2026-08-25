@@ -1,0 +1,53 @@
+# values.yaml
+controllers:
+  github-mcp:
+    type: deployment
+    replicas: 1
+    containers:
+      main:
+        image:
+          repository: ghcr.io/github/github-mcp-server
+          tag: latest
+          pullPolicy: IfNotPresent
+        args:
+          - http
+          - --port
+          - "8000"
+          - --gh-host
+          - "https://github.ibm.com"
+          - --toolsets
+          - "repos,issues,pull_requests,actions,code_security"
+        envFrom:
+          - secretRef:
+              name: github-mcp-credentials
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+service:
+  main:
+    controller: github-mcp
+    ports:
+      http:
+        port: 8000
+
+# Abilita Ingress solo se devi esporre l'endpoint MCP fuori dal cluster K8s
+# ingress:
+#   main:
+#     enabled: true
+#     className: nginx
+#     annotations:
+#       nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+#       nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+#     hosts:
+#       - host: github-mcp.github.svc.cluster.local
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             service:
+#               identifier: main
+#               port: http

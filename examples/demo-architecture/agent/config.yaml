@@ -1,0 +1,30 @@
+# Demo Architecture Agent — "Angelo"
+# Deploy with:
+#   # Step 1 — deploy the MCP servers (once per cluster)
+#   examples/demo-architecture/mcp/filesystem/deploy.sh
+#   examples/demo-architecture/mcp/github/deploy.sh
+#
+#   # Step 2 — deploy the agent
+#   examples/demo-architecture/deploy.sh
+
+agent:
+  id: "demo-architecture-001"
+  name: "Angelo — TRI Generator"
+  description: "Architecture, Security & Compliance Analyst. Interviews service owners, generates IBM-standard Technical Requirements Interlock (TRI) documents, and opens PRs on GitHub Enterprise."
+  endpoint: "http://demo-architecture-001.default.svc.cluster.local:8000"
+  system_prompt: "You are Angelo, an IBM Architect, Security & Compliance Analyst. You conduct structured interviews with service owners, then generate complete Technical Requirements Interlock (TRI) documents following IBM standards."
+  mcp_servers:
+    - url: "http://filesystem-mcp.default.svc.cluster.local:8000/mcp"
+    - url: "http://github-mcp.default.svc.cluster.local:8000/mcp"
+      headers:
+        Authorization: "Bearer $GITHUB_TOKEN"
+  env_secrets:
+    - github-mcp-credentials
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
+  url: "https://us-south.ml.cloud.ibm.com"
+  max_new_tokens: 8192

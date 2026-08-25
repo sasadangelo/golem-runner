@@ -1,4 +1,4 @@
-# Golem Demo — Aria, the SRE Agent
+# Golem Demo — Fabio, the SRE Agent
 
 **Audience:** technical or semi-technical stakeholders.
 **Duration:** ~7 minutes.
@@ -27,14 +27,7 @@ golem cp use --name minikube
 ## Step 1 — Deploy the kubernetes-mcp-server (once per cluster)
 
 ```bash
-helm upgrade -i -n kubernetes-mcp-server --create-namespace kubernetes-mcp-server \
-  oci://ghcr.io/containers/charts/kubernetes-mcp-server \
-  -f examples/demo-sre/mcp/values.yaml
-```
-
-Wait for the MCP server to be ready:
-```bash
-kubectl rollout status -n kubernetes-mcp-server deployment/kubernetes-mcp-server
+examples/demo-sre/mcp/kubernetes/deploy.sh
 ```
 
 The server will be reachable at:
@@ -48,21 +41,21 @@ http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080
 
 ```bash
 golem agent create \
-  --config   examples/demo-sre/config.yaml \
-  --agents-md examples/demo-sre/AGENTS.md \
-  --skill    examples/demo-sre/check-health.md \
-  --skill    examples/demo-sre/inspect-env.md \
-  --skill    examples/demo-sre/inspect-k8s.md
+  --config   examples/demo-sre/agent/config.yaml \
+  --agents-md examples/demo-sre/agent/AGENTS.md \
+  --skill    examples/demo-sre/agent/skills/check-health.md \
+  --skill    examples/demo-sre/agent/skills/inspect-env.md \
+  --skill    examples/demo-sre/agent/skills/inspect-k8s.md
 ```
 
 Expected output:
 ```
-Agent created: id=aria-sre-001  namespace=aria-sre-001  name=Aria — SRE Agent  status=pending
+Agent created: id=demo-sre-001  namespace=demo-sre-001  name=Fabio — SRE Agent  status=pending
 ```
 
 Wait for the pod to start:
 ```bash
-golem agent status --id aria-sre-001
+golem agent status --id demo-sre-001
 # → running
 ```
 
@@ -71,7 +64,7 @@ golem agent status --id aria-sre-001
 ## Step 3 — Open a chat session
 
 ```bash
-golem chat --id aria-sre-001
+golem chat --id demo-sre-001
 ```
 
 ---
@@ -82,7 +75,7 @@ golem chat --id aria-sre-001
 ```
 Who are you and what can you do?
 ```
-> Aria introduces herself, lists her tools including Kubernetes inspection via MCP.
+> Fabio introduces herself, lists her tools including Kubernetes inspection via MCP.
 
 ---
 
@@ -90,7 +83,7 @@ Who are you and what can you do?
 ```
 Check if https://google.com is reachable and give me a structured report.
 ```
-> Aria calls `http_check`, interprets the status code, returns a formatted report.
+> Fabio calls `http_check`, interprets the status code, returns a formatted report.
 
 ---
 
@@ -98,7 +91,7 @@ Check if https://google.com is reachable and give me a structured report.
 ```
 Give me a full environment report of this container: resources, mounted files, running processes.
 ```
-> Aria runs bash commands and returns a structured Markdown report.
+> Fabio runs bash commands and returns a structured Markdown report.
 
 ---
 
@@ -106,7 +99,7 @@ Give me a full environment report of this container: resources, mounted files, r
 ```
 List all pods across all namespaces and tell me if anything is failing.
 ```
-> Aria calls MCP kubernetes tools (`list_pods`), scans all namespaces, identifies any
+> Fabio calls MCP kubernetes tools (`list_pods`), scans all namespaces, identifies any
 > pods in `Pending`, `CrashLoopBackOff`, or `Error` state, and returns a structured report.
 
 ---
@@ -116,7 +109,7 @@ List all pods across all namespaces and tell me if anything is failing.
 The golem-control-plane namespace might have issues. Check the pod statuses there,
 look for any warning events, and also verify the control plane HTTP endpoint is reachable.
 ```
-> Aria:
+> Fabio:
 > 1. Calls MCP `list_pods` for the `golem-control-plane` namespace
 > 2. Calls MCP `list_events` for the same namespace
 > 3. Calls `http_check` on the control plane endpoint
@@ -128,7 +121,7 @@ look for any warning events, and also verify the control plane HTTP endpoint is 
 ```
 Give me a full cluster health report: namespaces, deployments, any failing workloads.
 ```
-> Aria calls `list_namespaces`, `list_deployments` across namespaces, correlates with
+> Fabio calls `list_namespaces`, `list_deployments` across namespaces, correlates with
 > events, and produces a complete cluster health summary.
 
 ---
@@ -136,7 +129,7 @@ Give me a full cluster health report: namespaces, deployments, any failing workl
 ## Teardown
 
 ```bash
-golem agent delete --id aria-sre-001
+golem agent delete --id demo-sre-001
 
 # Optional: remove the MCP server
 helm uninstall -n kubernetes-mcp-server kubernetes-mcp-server

@@ -105,7 +105,7 @@ async def _register_with_control_plane(card: dict[str, Any]) -> None:
 
 
 async def _load_mcp_tools() -> list[BaseTool]:
-    """Connect to each MCP server URI in ``settings.agent.mcp_servers`` and
+    """Connect to each MCP server in ``settings.agent.mcp_servers`` and
     collect their tools.
 
     Returns an empty list when no MCP servers are configured or when all
@@ -113,19 +113,22 @@ async def _load_mcp_tools() -> list[BaseTool]:
     """
     mcp_logger = logging.getLogger("runner.mcp")
 
-    uris = settings.agent.mcp_servers
-    if not uris:
+    servers = settings.agent.mcp_servers
+    if not servers:
         mcp_logger.info("No MCP servers configured — starting with built-in tools only")
         return []
 
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
-    connections: dict[str, Any] = {
-        f"mcp_{i}": {"url": uri, "transport": "streamable_http"}
-        for i, uri in enumerate(uris)
-    }
+    connections: dict[str, Any] = {}
+    for i, srv in enumerate(servers):
+        entry: dict[str, Any] = {"url": srv.url, "transport": "streamable_http"}
+        resolved = srv.resolved_headers()
+        if resolved:
+            entry["headers"] = resolved
+        connections[f"mcp_{i}"] = entry
 
-    mcp_logger.info("Connecting to %d MCP server(s): %s", len(uris), uris)
+    mcp_logger.info("Connecting to %d MCP server(s): %s", len(servers), [s.url for s in servers])
 
     tools: list[BaseTool] = []
     try:
@@ -134,11 +137,28 @@ async def _load_mcp_tools() -> list[BaseTool]:
         mcp_logger.info(
             "Loaded %d MCP tool(s) from %d server(s): %s",
             len(tools),
-            len(uris),
+            len(servers),
             [t.name for t in tools],
         )
     except Exception as exc:  # noqa: BLE001
-        mcp_logger.warning("Failed to load MCP tools (runner will start without them): %s", exc)
+        # ExceptionGroup (raised by asyncio.TaskGroup inside MultiServerMCPClient)
+        # wraps the real cause in sub-exceptions — surface them all so the log
+        # shows the actual connection error rather than "unhandled errors in a
+        # TaskGroup (1 sub-exception)".
+        if isinstance(exc, ExceptionGroup):
+            causes = "; ".join(f"{type(e).__name__}: {e}" for e in exc.exceptions)
+            mcp_logger.warning(
+                "Failed to load MCP tools (runner will start without them): %s — causes: [%s]",
+                exc,
+                causes,
+                exc_info=exc,
+            )
+        else:
+            mcp_logger.warning(
+                "Failed to load MCP tools (runner will start without them): %s",
+                exc,
+                exc_info=exc,
+            )
 
     return tools
 
@@ -228,6 +248,7 @@ async def ws_chat(websocket: WebSocket) -> None:
             history.append(HumanMessage(content=user_message))
             inputs: dict[str, list[BaseMessage]] = {"messages": history}
             reply_tokens: list[str] = []
+            tool_calls_made: int = 0
             try:
                 async for event in agent_executor.astream_events(
                     inputs,
@@ -236,6 +257,7 @@ async def ws_chat(websocket: WebSocket) -> None:
                 ):
                     kind = event["event"]
                     if kind == "on_tool_start":
+                        tool_calls_made += 1
                         logger.info("Tool call: %s  args=%s", event["name"], event["data"].get("input"))
                     elif kind == "on_tool_end":
                         output = str(event["data"].get("output", ""))[:200]
@@ -248,6 +270,11 @@ async def ws_chat(websocket: WebSocket) -> None:
                         if token:
                             reply_tokens.append(token)
                             await websocket.send_text(token)
+                # If the model only made tool calls without a final text reply,
+                # send a minimal confirmation so the client is not left hanging.
+                if not reply_tokens and tool_calls_made > 0:
+                    await websocket.send_text("✅ Done.")
+                    reply_tokens = ["✅ Done."]
                 await websocket.send_text(data="[DONE]")
                 history.append(AIMessage(content="".join(reply_tokens)))
                 logger.info("Turn complete — %d tokens streamed", len(reply_tokens))

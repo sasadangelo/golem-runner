@@ -15,12 +15,60 @@ Usage
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, YamlConfigSettingsSource
+
+# ---------------------------------------------------------------------------
+# MCP server connection descriptor
+# ---------------------------------------------------------------------------
+
+
+class MCPServerConfig(BaseModel):
+    """A single MCP server connection — URL plus optional per-server HTTP headers.
+
+    Header values that start with ``$`` are resolved from environment variables
+    at runtime (e.g. ``"$GITHUB_TOKEN"`` → ``os.environ["GITHUB_TOKEN"]``).
+    Plain strings are used as-is.
+
+    Both short form (bare URI string) and long form (this object) are accepted
+    in ``agent.mcp_servers``; the short form is coerced to ``MCPServerConfig``
+    automatically via the ``AgentConfig`` validator.
+    """
+
+    url: str
+    headers: dict[str, str] = Field(default_factory=dict)
+
+    def resolved_headers(self) -> dict[str, str]:
+        """Return headers with ``$VAR`` placeholders substituted from env.
+
+        Replaces every ``$VARNAME`` token in a header value with the
+        corresponding environment variable.  Warns and substitutes an empty
+        string when a referenced variable is not set.
+        """
+        import re
+
+        _VAR_RE = re.compile(r"\$([A-Z_][A-Z0-9_]*)")
+
+        out: dict[str, str] = {}
+        for key, value in self.headers.items():
+            def _replace(m: re.Match) -> str:  # noqa: ANN001
+                env_var = m.group(1)
+                resolved = os.environ.get(env_var)
+                if resolved is None:
+                    logging.getLogger("runner.mcp").warning(
+                        "MCP header '%s' references env var '%s' which is not set", key, env_var
+                    )
+                    return ""
+                return resolved
+
+            out[key] = _VAR_RE.sub(_replace, value)
+        return out
+
 
 # ---------------------------------------------------------------------------
 # Section: agent  (plain BaseModel — no env_prefix; env overrides applied in
@@ -54,12 +102,32 @@ class AgentConfig(BaseModel):
         description="Control Plane base URL for handshake registration (e.g. http://golem-cp:9000). "
         "Leave empty to skip handshake (useful for local dev without a Control Plane).",
     )
-    mcp_servers: list[str] = Field(
+    mcp_servers: list[MCPServerConfig] = Field(
         default_factory=list,
-        description="List of static MCP server URIs to connect at boot "
-        "(e.g. ['http://mcp-kubernetes.golem-mcp-shared:8080/sse']). "
-        "Set in config.yaml under agent.mcp_servers.",
+        description="List of MCP servers to connect at boot. Each entry is either "
+        "a plain URI string (no auth) or an object with 'url' and optional 'headers' "
+        "(header values starting with '$' are resolved from env vars at runtime).",
     )
+    env_secrets: list[str] = Field(
+        default_factory=list,
+        description="Names of K8s Secrets already present in the agent namespace to mount "
+        "as envFrom in the pod (e.g. ['github-mcp-credentials']). "
+        "The deploy.sh creates these secrets before calling golem agent create.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_mcp_servers(cls, data: Any) -> Any:  # noqa: ANN401
+        """Coerce bare URI strings in mcp_servers to MCPServerConfig dicts."""
+        if isinstance(data, dict) and "mcp_servers" in data:
+            coerced = []
+            for entry in data["mcp_servers"]:
+                if isinstance(entry, str):
+                    coerced.append({"url": entry})
+                else:
+                    coerced.append(entry)
+            data["mcp_servers"] = coerced
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +148,11 @@ class LLMConfig(BaseModel):
     project_id: str = Field(
         default="9def6989-c276-4042-8fc2-5b77a8e56ade",
         description="WatsonX project ID.",
+    )
+    max_new_tokens: int = Field(
+        default=2048,
+        description="Maximum number of tokens the model can generate in a single response "
+        "(mapped to max_tokens in the WatsonX TextChatParameters).",
     )
     # Secret — populated from WATSONX_API_KEY in model_post_init, never from YAML.
     api_key: SecretStr | None = Field(
