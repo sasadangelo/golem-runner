@@ -96,6 +96,7 @@ async def _init_workspace(workspace_path: str) -> None:
 def _build_app(_workspace_path: str) -> Any:
     """Build the FastMCP streamable-HTTP ASGI app (no auth, local mode)."""
     from mcp.server.fastmcp import FastMCP
+    from mcp.server.transport_security import TransportSecuritySettings
     from tools import register  # type: ignore[import-not-found]
     from vaultfs import SqliteVaultFS  # type: ignore[import-not-found]
 
@@ -107,6 +108,18 @@ def _build_app(_workspace_path: str) -> Any:
             "Call the `guide` tool first to see available knowledge bases and learn the full workflow."
         ),
         # No auth in local mode — connections come only from inside the cluster.
+        # Allow in-cluster DNS hostnames so the MCP SDK's DNS-rebinding protection
+        # does not reject requests with 421 Misdirected Request.
+        transport_security=TransportSecuritySettings(
+            allowed_hosts=[
+                "llmwiki-mcp.default.svc.cluster.local:8080",
+                "llmwiki-mcp.default.svc.cluster.local",
+                "localhost:8080",
+                "localhost",
+                "127.0.0.1:8080",
+                "127.0.0.1",
+            ]
+        ),
     )
 
     def _get_user_id(_ctx: Any) -> str:

@@ -140,18 +140,17 @@ async def _load_mcp_tools() -> list[BaseTool]:
             len(servers),
             [t.name for t in tools],
         )
-    except Exception as exc:  # noqa: BLE001
-        # ExceptionGroup (raised by asyncio.TaskGroup inside MultiServerMCPClient)
-        # wraps the real cause in sub-exceptions — surface them all so the log
-        # shows the actual connection error rather than "unhandled errors in a
-        # TaskGroup (1 sub-exception)".
-        if isinstance(exc, ExceptionGroup):
+    except BaseException as exc:  # noqa: BLE001
+        # anyio raises BaseExceptionGroup (a BaseException subclass, not Exception)
+        # when a TaskGroup task fails, so a plain `except Exception` misses it.
+        # We catch BaseException here, surface the real sub-causes, then return
+        # an empty tool list so the runner still starts.
+        if isinstance(exc, BaseExceptionGroup):
             causes = "; ".join(f"{type(e).__name__}: {e}" for e in exc.exceptions)
             mcp_logger.warning(
                 "Failed to load MCP tools (runner will start without them): %s — causes: [%s]",
                 exc,
                 causes,
-                exc_info=exc,
             )
         else:
             mcp_logger.warning(
