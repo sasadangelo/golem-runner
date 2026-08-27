@@ -12,6 +12,28 @@ agent:
   # Example (kubernetes-mcp-server deployed via Helm):
   #   mcp_servers:
   #     - "http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080"
+  #
+  # env_secrets: names of K8s Secrets already present in the agent namespace
+  # to mount as envFrom in the pod. Create the secret before deploying:
+  #   kubectl create secret generic my-credentials \
+  #     --from-literal=MY_API_KEY=xxx -n <agent-id>
+  # Example:
+  #   env_secrets:
+  #     - "my-credentials"
+  #
+  # triggers: background triggers that fire automatically without a user message.
+  # Supported types: timer, cron, webhook.
+  # Examples:
+  #   triggers:
+  #     - type: timer
+  #       interval_seconds: 30
+  #       message: "Check if http://my-service.svc.cluster.local/health is healthy."
+  #     - type: cron
+  #       cron: "0 9 * * 1-5"
+  #       message: "Send the daily standup summary."
+  #     - type: webhook
+  #       path: "/trigger/my-event"
+  #       message: "Handle incoming event."
 
 llm:
   provider: "watsonx"

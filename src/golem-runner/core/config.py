@@ -114,6 +114,12 @@ class AgentConfig(BaseModel):
         "as envFrom in the pod (e.g. ['github-mcp-credentials']). "
         "The deploy.sh creates these secrets before calling golem agent create.",
     )
+    triggers: list[dict] = Field(
+        default_factory=list,
+        description="Background triggers to start at boot. Each entry must have a 'type' field "
+        "('cron', 'timer', or 'webhook') plus type-specific fields. "
+        "Example: [{type: cron, cron: '*/30 * * * *', message: 'health-check /health'}]",
+    )
 
     @model_validator(mode="before")
     @classmethod

@@ -20,7 +20,8 @@ from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
-from golem_agent_sdk.router import build_a2a_router
+from golem_agent_sdk.router import build_a2a_router, task_store
+from golem_agent_sdk.trigger_scheduler import TriggerScheduler
 
 # ---------------------------------------------------------------------------
 # Logging — configure all runner.* loggers to appear in stdout alongside uvicorn
@@ -143,8 +144,6 @@ async def _load_mcp_tools() -> list[BaseTool]:
     except BaseException as exc:  # noqa: BLE001
         # anyio raises BaseExceptionGroup (a BaseException subclass, not Exception)
         # when a TaskGroup task fails, so a plain `except Exception` misses it.
-        # We catch BaseException here, surface the real sub-causes, then return
-        # an empty tool list so the runner still starts.
         if isinstance(exc, BaseExceptionGroup):
             causes = "; ".join(f"{type(e).__name__}: {e}" for e in exc.exceptions)
             mcp_logger.warning(
@@ -163,24 +162,61 @@ async def _load_mcp_tools() -> list[BaseTool]:
 
 
 # ---------------------------------------------------------------------------
-# Lifespan: MCP boot + handshake
+# Lifespan: MCP boot + handshake + trigger scheduler
 # ---------------------------------------------------------------------------
 
 # Module-level reference; set during lifespan so all endpoint handlers share it.
 agent_executor: CompiledStateGraph | None = None
 
+# Module-level scheduler; set during lifespan so the router can reference it.
+trigger_scheduler: TriggerScheduler | None = None
+
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
-    """FastAPI lifespan: load MCP tools, compile agent, then call handshake."""
-    global agent_executor  # noqa: PLW0603
+    """FastAPI lifespan: load MCP tools, compile agent, start triggers, handshake."""
+    global agent_executor, trigger_scheduler  # noqa: PLW0603
 
     mcp_tools = await _load_mcp_tools()
     agent_executor = build_agent(mcp_tools=mcp_tools)
     logger.info("Agent compiled — built-in tools + %d MCP tool(s)", len(mcp_tools))
 
     await _register_with_control_plane(AGENT_CARD)
-    yield
+
+    # Start background trigger scheduler
+    trigger_scheduler = TriggerScheduler(executor=_langgraph_executor, task_store=task_store)
+    _seed_triggers_from_config(trigger_scheduler)
+    await trigger_scheduler.start(app_)
+    logger.info("TriggerScheduler started with %d trigger(s)", len(trigger_scheduler.list_all()))
+
+    try:
+        yield
+    finally:
+        await trigger_scheduler.stop()
+
+
+def _seed_triggers_from_config(scheduler: TriggerScheduler) -> None:
+    """Register triggers declared in config.yaml under ``agent.triggers``.
+
+    Each entry must have a ``type`` field (``cron``, ``timer``, or ``webhook``).
+    Invalid entries are logged as warnings and skipped.
+    """
+    from golem_agent_sdk.models import CronTrigger, TimerTrigger, WebhookTrigger
+
+    triggers_cfg = getattr(settings.agent, "triggers", None) or []
+    for raw in triggers_cfg:
+        try:
+            trigger_type = raw.get("type") if isinstance(raw, dict) else None
+            if trigger_type == "cron":
+                scheduler.register(CronTrigger(**raw))
+            elif trigger_type == "timer":
+                scheduler.register(TimerTrigger(**raw))
+            elif trigger_type == "webhook":
+                scheduler.register(WebhookTrigger(**raw))
+            else:
+                logger.warning("Unknown trigger type in config: %s — skipping", raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Invalid trigger config %s — skipping: %s", raw, exc)
 
 
 app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0", lifespan=lifespan)
@@ -195,7 +231,7 @@ async def well_known_middleware(request: Request, call_next: Any) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# A2A router
+# A2A router (including trigger endpoints)
 # ---------------------------------------------------------------------------
 
 
@@ -207,7 +243,28 @@ def _langgraph_executor(text: str) -> str:
     return str(result["messages"][-1].content)
 
 
-app.include_router(build_a2a_router(_langgraph_executor))
+# Build the router with a deferred scheduler reference so the router is
+# registered during module import (before lifespan runs) yet uses the
+# scheduler that is set inside lifespan.
+def _get_scheduler() -> TriggerScheduler | None:
+    return trigger_scheduler
+
+
+# We mount the router immediately; the scheduler is None at import time but
+# will be set in lifespan before any request can reach the trigger endpoints.
+# We pass a proxy that always reads the module-level variable.
+class _SchedulerProxy:
+    """Lazy proxy forwarding all attribute access to the module-level scheduler."""
+
+    def __getattr__(self, name: str) -> Any:
+        if trigger_scheduler is None:
+            raise RuntimeError("TriggerScheduler not initialised yet.")
+        return getattr(trigger_scheduler, name)
+
+
+_scheduler_proxy = _SchedulerProxy()
+
+app.include_router(build_a2a_router(_langgraph_executor, scheduler=_scheduler_proxy))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -269,8 +326,6 @@ async def ws_chat(websocket: WebSocket) -> None:
                         if token:
                             reply_tokens.append(token)
                             await websocket.send_text(token)
-                # If the model only made tool calls without a final text reply,
-                # send a minimal confirmation so the client is not left hanging.
                 if not reply_tokens and tool_calls_made > 0:
                     await websocket.send_text("✅ Done.")
                     reply_tokens = ["✅ Done."]
