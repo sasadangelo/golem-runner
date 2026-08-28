@@ -1,4 +1,4 @@
-# Demo — Matteo: Site Reliability Agent
+# Demo — Matteo: Monitoring Agent
 
 Matteo is an autonomous monitoring agent that checks a service every 30 seconds and sends
 Slack alerts when it goes down — and a recovery notification when it comes back up.
