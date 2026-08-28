@@ -102,6 +102,12 @@ class AgentConfig(BaseModel):
         description="Control Plane base URL for handshake registration (e.g. http://golem-cp:9000). "
         "Leave empty to skip handshake (useful for local dev without a Control Plane).",
     )
+    delegation_timeout_seconds: int = Field(
+        default=300,
+        description="Max seconds to wait for a delegated A2A task to complete. "
+        "Used by the delegate skill when polling the target agent after fire-and-forget submission. "
+        "Only relevant for agents that use the 'delegate' skill.",
+    )
     mcp_servers: list[MCPServerConfig] = Field(
         default_factory=list,
         description="List of MCP servers to connect at boot. Each entry is either "

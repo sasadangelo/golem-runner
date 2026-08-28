@@ -2,7 +2,14 @@
 # Copyright (c) 2026 Salvatore D'Angelo, Code4Projects
 # Licensed under the MIT License. See LICENSE.md for details.
 # -----------------------------------------------------------------------------
-"""LangGraph agent with dynamic tool loading from configuration."""
+"""LangGraph agent with dynamic tool loading from configuration.
+
+Available built-in tools
+------------------------
+- ``bash``        execute_bash_command  — run shell commands inside the pod
+- ``http_check``  http_health_check     — probe an HTTP endpoint
+- ``delegate``    delegate_to_agent     — send a sub-task to another agent via CP
+"""
 
 import logging
 from pathlib import Path
@@ -25,16 +32,19 @@ else:
 
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from tools.a2a_tools import delegate_to_agent
 from tools.http_tools import http_health_check
 from tools.system_tools import execute_bash_command
 from typing_extensions import TypedDict
 
 logger = logging.getLogger("runner.agent")
 
-# Central registry of available built-in skills
+# Central registry of available built-in tools.
+# Add the tool name to ``enabled_skills`` in config.yaml to activate it.
 TOOL_REGISTRY: dict[str, BaseTool] = {
     "bash": execute_bash_command,
     "http_check": http_health_check,
+    "delegate": delegate_to_agent,
 }
 
 # ---------------------------------------------------------------------------

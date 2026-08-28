@@ -23,6 +23,7 @@ at mount time so it stays completely decoupled from LangGraph.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -142,10 +143,14 @@ def build_a2a_router(
     # A2A task lifecycle endpoints
     # ------------------------------------------------------------------
 
-    @router.post("/tasks/send", response_model=A2ATaskResponse)
+    @router.post("/tasks/send", response_model=A2ATaskResponse, status_code=202)
     async def tasks_send(params: A2ASendRequest) -> A2ATaskResponse:
         """
-        Receive an inbound A2A task, execute it, and return the result.
+        Receive an inbound A2A task and execute it asynchronously (fire-and-forget).
+
+        The task is created immediately with ``status=submitted`` and the response
+        is returned before execution begins.  Poll ``GET /a2a/tasks/{task_id}``
+        to check progress.
 
         Lifecycle: submitted → working → completed / failed.
 
@@ -167,25 +172,26 @@ def build_a2a_router(
         )
         task_store.add(task)
 
-        task.status = TaskStatus.WORKING
-        task.updated_at = datetime.now(UTC)
-
-        try:
-            reply: str = executor(text)
-        except Exception as exc:
-            task.status = TaskStatus.FAILED
-            task.result = str(exc)
+        async def _run() -> None:
+            task.status = TaskStatus.WORKING
             task.updated_at = datetime.now(UTC)
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            try:
+                loop = asyncio.get_event_loop()
+                reply: str = await loop.run_in_executor(None, executor, text)
+                task.status = TaskStatus.COMPLETED
+                task.result = reply
+            except Exception as exc:  # noqa: BLE001
+                task.status = TaskStatus.FAILED
+                task.result = str(exc)
+            finally:
+                task.updated_at = datetime.now(UTC)
 
-        task.status = TaskStatus.COMPLETED
-        task.result = reply
-        task.updated_at = datetime.now(UTC)
+        asyncio.create_task(_run())
 
         return A2ATaskResponse(
             id=task.task_id,
-            status={"state": TaskStatus.COMPLETED},
-            artifacts=[{"parts": [{"type": "text", "text": reply}]}],
+            status={"state": TaskStatus.SUBMITTED},
+            artifacts=[],
         )
 
     @router.get("/tasks/{task_id}", response_model=TaskStatusResponse)

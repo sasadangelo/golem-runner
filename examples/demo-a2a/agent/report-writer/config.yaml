@@ -1,0 +1,23 @@
+# Demo A2A — Report Writer agent
+# Receives raw findings from the Log Analyzer and produces polished
+# Markdown incident reports.
+#
+# Deploy with:
+#   examples/demo-a2a/deploy.sh
+
+agent:
+  id: "report-writer-001"
+  name: "Report Writer"
+  description: "Transforms raw diagnostic findings into professional Markdown incident reports."
+  endpoint: "http://report-writer-001.report-writer-001.svc.cluster.local:8000"
+  system_prompt: "You are a Report Writer. Transform raw findings into professional Markdown incident reports."
+  enabled_skills: "bash"
+  cp_url: "http://golem-cp.golem-system.svc.cluster.local:9000"
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
+  url: "https://us-south.ml.cloud.ibm.com"
+  max_new_tokens: 4096

@@ -1,0 +1,24 @@
+# Demo A2A — Log Analyzer agent
+# Fetches and analyses logs from the mock-log-service, then delegates
+# report writing to report-writer-001 via A2A delegation.
+#
+# Deploy with:
+#   examples/demo-a2a/deploy.sh
+
+agent:
+  id: "log-analyzer-001"
+  name: "Log Analyzer"
+  description: "Fetches application logs, detects HTTP 500 errors and anomalies, delegates report writing to Report Writer."
+  endpoint: "http://log-analyzer-001.log-analyzer-001.svc.cluster.local:8000"
+  system_prompt: "You are a Log Analyzer. Fetch logs, identify errors and anomalies, then delegate report writing to report-writer-001."
+  enabled_skills: "bash,http_check,delegate"
+  cp_url: "http://golem-cp.golem-system.svc.cluster.local:9000"
+  delegation_timeout_seconds: 300
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
+  url: "https://us-south.ml.cloud.ibm.com"
+  max_new_tokens: 2048

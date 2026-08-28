@@ -5,6 +5,17 @@ agent:
   endpoint: "http://localhost:8001"
   system_prompt: "You are a helpful generic automation agent."
   enabled_skills: "bash,http_check"
+  # cp_url: Control Plane base URL for handshake registration and A2A delegation.
+  # Required only for agents that delegate tasks to other agents via the `delegate` skill.
+  # Leave empty (or omit) for standalone agents.
+  # Example:
+  #   cp_url: "http://golem-cp.golem-system.svc.cluster.local:9000"
+  #
+  # delegation_timeout_seconds: max seconds to wait for a delegated A2A task to complete.
+  # Only relevant for agents that use the `delegate` skill. Default: 300.
+  # Example:
+  #   delegation_timeout_seconds: 300
+  #
   # mcp_servers: list of static MCP server URIs to connect at boot.
   # The runner calls MultiServerMCPClient with these URIs and registers each
   # server's tools into the LangGraph tool node automatically.
@@ -41,4 +52,3 @@ llm:
   model: "openai/gpt-oss-120b"
   project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
   url: "https://us-south.ml.cloud.ibm.com"
-  cp_url: ""
