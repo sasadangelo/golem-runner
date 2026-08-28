@@ -1,0 +1,18 @@
+# Demo Chatbot Agent — "Bonnie"
+# Deploy with:
+#   examples/demo-chatbot/deploy.sh
+
+agent:
+  id: "demo-chatbot-001"
+  name: "Bonnie — Conversational Assistant"
+  description: "General-purpose conversational assistant. Engages in open-ended dialogue, answers questions, explains concepts, and helps users think through problems."
+  endpoint: "http://demo-chatbot-001.default.svc.cluster.local:8000"
+  system_prompt: "You are Bonnie, a friendly and knowledgeable conversational assistant. You engage in open-ended dialogue, answer questions on a wide range of topics, explain concepts clearly, and help users think through problems. You are concise, honest, and always ready to continue the conversation."
+
+llm:
+  provider: "watsonx"
+  protocol: "watsonx"
+  model: "openai/gpt-oss-120b"
+  project_id: "9def6989-c276-4042-8fc2-5b77a8e56ade"
+  url: "https://us-south.ml.cloud.ibm.com"
+  max_new_tokens: 8192

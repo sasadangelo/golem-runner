@@ -171,6 +171,12 @@ agent_executor: CompiledStateGraph | None = None
 # Module-level scheduler; set during lifespan so the router can reference it.
 trigger_scheduler: TriggerScheduler | None = None
 
+# ---------------------------------------------------------------------------
+# Conversation history store — keyed by conversation_id (str).
+# The special key "" holds the legacy implicit single-conversation history.
+# ---------------------------------------------------------------------------
+_conversation_histories: dict[str, list[BaseMessage]] = {}
+
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
@@ -293,10 +299,31 @@ async def chat(payload: ChatPayload) -> ChatResponse:
 
 
 @app.websocket(path="/ws/chat")
-async def ws_chat(websocket: WebSocket) -> None:
+async def ws_chat(websocket: WebSocket, conversation_id: str | None = None) -> None:
+    """Handle a streaming WebSocket chat session.
+
+    When ``conversation_id`` is provided the message history for that
+    conversation is reused across connections, keeping each conversation
+    isolated from others.  Without a ``conversation_id`` the legacy implicit
+    single-history behaviour is preserved (key ``""`` in the store).
+
+    Args:
+        websocket:       The inbound WebSocket connection.
+        conversation_id: Optional UUID forwarded by the Control Plane proxy.
+    """
     assert agent_executor is not None, "agent_executor not initialised"  # noqa: S101
     await websocket.accept()
-    history: list[BaseMessage] = []
+
+    # Resolve the history bucket — "" is the legacy implicit conversation.
+    history_key: str = conversation_id or ""
+    history: list[BaseMessage] = _conversation_histories.setdefault(history_key, [])
+
+    logger.info(
+        "WS chat session opened — conversation_id=%s  history_len=%d",
+        conversation_id or "<implicit>",
+        len(history),
+    )
+
     try:
         while True:
             user_message: str = await websocket.receive_text()
@@ -337,7 +364,10 @@ async def ws_chat(websocket: WebSocket) -> None:
                 await websocket.send_text(data=f"[ERROR] {e}")
                 logger.error("Agent error during turn: %s", e)
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
+        logger.info(
+            "WebSocket disconnected — conversation_id=%s",
+            conversation_id or "<implicit>",
+        )
 
 
 @app.get(path="/health")
