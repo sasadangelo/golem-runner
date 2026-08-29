@@ -1,267 +1,149 @@
 <p align="center">
-  <img src="docs/img/golem-logo.png" alt="Golem Runner Logo" width="300" />
+  <img src="docs/img/golem-logo.png" alt="Golem Runner" width="300" />
 </p>
 
 # Golem Runner
 
-**Golem Runner** is a generic, configurable AI agent container.
-It is a single Docker image that can be turned into any specialised agent at runtime — no rebuild required.
+**Golem Runner** is the agent execution unit of the [Golem](https://github.com/sasadangelo/golem-control-plane) platform.
 
-> Part of the [Golem](https://github.com/sasadangelo/golem-control-plane) platform, but fully usable as a standalone component.
+It is a single Docker image that becomes any specialised agent at runtime — no rebuild required.
+The Control Plane provisions one Runner container per agent, injecting identity (`AGENTS.md`),
+skills (`SKILL.md`), and configuration (`config.yaml`) via ConfigMap mounts.
 
----
-
-## Features
-
-| Feature | Status |
-|---|:---:|
-| Configurable AI agent — identity, system prompt, and skills set via `config.yaml`, no rebuild needed | ✅ |
-| LangGraph-based agentic loop with dynamic tool binding | ✅ |
-| In-memory conversation history — multi-turn context maintained across messages | ✅ |
-| WebSocket streaming endpoint (`/ws/chat`) — streams LLM tokens, terminates with `[DONE]` | ✅ |
-| Synchronous HTTP chat endpoint (`POST /chat`) | ✅ |
-| A2A Agent Card served at `/.well-known/agent.json` | ✅ |
-| A2A inbound task endpoint (`POST /a2a/tasks/send`) | ✅ |
-| Built-in tools: `bash` (shell commands) and `http_check` (HTTP health check) | ✅ |
-| Extensible tool catalogue — add a `@tool` function, register it, enable via config | ✅ |
-| Secrets via `.env` / environment variables, config via `config.yaml` (mount as ConfigMap) | ✅ |
-| Liveness probe (`GET /health`) | ✅ |
-| `AGENTS.md` injection — custom agent behavioural context at boot | 🔜 |
-| `SKILL.md` injection — lazy per-turn skill protocol injection | 🔜 |
+> 📖 For the full platform overview, features, roadmap, and demos see the
+> **[Golem Control Plane](https://github.com/sasadangelo/golem-control-plane)** repository.
 
 ---
 
-## Quick Start
+## Getting Started
 
-### 1. Clone the repository
+### Local deployment (no Kubernetes, no Docker)
+
+The fastest way to run the runner on your machine:
 
 ```bash
+# 1. clone and enter the repo
 git clone https://github.com/sasadangelo/golem-runner.git
 cd golem-runner
-```
 
-### 2. Configuration
-
-Golem Runner is configured via two main files in the `src/golem-runner/` directory:
-- **`config.yaml`**: Manages all non-secret parameters (e.g., agent identity, model settings, enabled skills).
-- **`.env`**: Manages sensitive credentials and API keys.
-
-First, copy the example environment file to create your local `.env`:
-
-```bash
+# 2. configure credentials
 cp src/golem-runner/.env.example src/golem-runner/.env
-```
+# edit .env: set WATSONX_API_KEY
 
-Open `src/golem-runner/.env` and enter your IBM WatsonX API key:
-
-```ini
-WATSONX_API_KEY=your-actual-ibm-cloud-api-key
-```
-
-### 3. Start the application
-
-Run the development script to boot up the agent server:
-
-```bash
+# 3. start the runner
 ./app.sh
+# → agent listening on http://localhost:8000
 ```
 
-This loads the configuration from `src/golem-runner/config.yaml` and secrets from `src/golem-runner/.env`, starting the FastAPI application with reload enabled on `http://localhost:8000`.
+Use the [Golem CLI](https://github.com/sasadangelo/golem-cli) to interact:
 
-### 4. Chat with the agent
-
-You can send chat requests to the agent via HTTP POST or WebSocket streaming.
-
-**Example A: Ask the agent what it can do over HTTP**
 ```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What can you do?"}'
+golem chat --id <agent_id>
 ```
 
-**Example B: Ask the agent to inspect a website over HTTP (triggers the `http_check` tool)**
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Check if https://google.com is reachable"}'
-```
+Or interact directly via the runner's REST/WebSocket API (see [docs/APIReference.md](docs/APIReference.md)).
 
-**Example C: Stream a response over WebSocket**
-```bash
-wscat -c ws://localhost:8000/ws/chat
-```
+### Minikube deployment (full Kubernetes setup)
 
-Then send a plain UTF-8 text message such as `What can you do?`. The server streams LLM chunks as text frames and ends the response with `[DONE]`.
+Follow the **[Minikube Deployment Guide](https://github.com/sasadangelo/golem-control-plane/blob/main/docs/MinikubeDeployment.md)** in the Control Plane repository — it covers image builds, RBAC, Secrets, and the full deploy flow for both components together.
 
 ---
 
-## Docker Integration
+## Image Management Scripts
 
-Once you are ready to containerise the application, you can build and run Golem Runner as a Docker container.
-
-### 1. Build the image
-
-Run the build command from the root folder:
-
-```bash
-docker build -t golem-runner:v1 .
-```
-
-### 2. Run the container
-
-The image ships with a default `config.yaml` baked in. You can run the container with just the secrets file:
-
-```bash
-docker run -d --name my-agent \
-  -p 8000:8000 \
-  --env-file src/golem-runner/.env \
-  golem-runner:v1
-```
-
-**Injecting a custom `config.yaml`**
-
-If you want to override the default configuration (agent identity, model settings, enabled skills, etc.) without rebuilding the image, mount your own `config.yaml` over the one inside the container:
-
-```bash
-docker run -d --name my-agent \
-  -p 8000:8000 \
-  --env-file src/golem-runner/.env \
-  -v "$(pwd)/my-config.yaml:/app/src/golem-runner/config.yaml:ro" \
-  golem-runner:v1
-```
-
-The path inside the container is `/app/src/golem-runner/config.yaml` — this is where the application looks for its configuration at startup. The `:ro` flag mounts it read-only as a safety measure.
-
-### 3. Test and Cleanup
-
-To test the containerised agent, use the same `curl` commands shown in the **Quick Start** section above (there is no need to repeat them).
-
-Once finished, clean up the running container:
-
-```bash
-docker stop my-agent && docker rm my-agent
-```
+| Script | Description |
+|---|---|
+| `build_images.sh` | Build the `golem-runner` image locally with Podman or Docker |
+| `delete_images.sh` | Remove the local `golem-runner` image |
+| `minikube/load_images.sh` | Load the local image into Minikube's internal registry |
+| `minikube/delete_images.sh` | Remove the image from Minikube |
 
 ---
 
-## Minikube (Podman driver)
+## Configuration
 
-If you are running Minikube with the Podman driver, the cluster cannot pull images from your local Podman daemon directly. You need to load the image into Minikube's internal registry after building it.
+The runner uses a two-layer configuration model:
 
-### 1. Build the image with Podman
+| Layer | Source | What goes here |
+|---|---|---|
+| Non-secret parameters | `config.yaml` (mounted as ConfigMap in K8s, or local file) | Agent identity, system prompt, skills, LLM settings, triggers, MCP servers |
+| Secret credentials | `WATSONX_API_KEY` environment variable | IBM Cloud API key |
 
-```bash
-podman build -t golem-runner:v1 .
-```
-
-### 2. Load the image into Minikube
-
-`minikube image load` does not work with the Podman driver. Instead, save the image to a tar archive and load it directly into the Minikube node:
-
-```bash
-podman save golem-runner:v1 -o /tmp/golem-runner-v1.tar
-minikube image load /tmp/golem-runner-v1.tar
-```
-
-### 3. Verify the image is available inside Minikube
-
-```bash
-minikube image ls | grep golem-runner
-```
-
-### 4. Deploy
-
-Set `imagePullPolicy: Never` in your Pod/Deployment spec to prevent Kubernetes from trying to pull the image from a remote registry:
+### `config.yaml` reference
 
 ```yaml
-containers:
-  - name: golem-runner
-    image: golem-runner:v1
-    imagePullPolicy: Never
+agent:
+  id: "my-agent-001"                    # Unique identifier (used as K8s namespace name)
+  name: "My Agent"                      # Human-readable name shown in the Agent Card
+  description: "What this agent does."
+  endpoint: "http://localhost:8000"     # Public URL of this container
+  system_prompt: "You are a helpful agent."
+  enabled_skills: "bash,http_check"     # Comma-separated embedded tool IDs
+
+  # Optional — only needed for agents that delegate tasks to other agents
+  cp_url: "http://golem-cp.golem-system.svc.cluster.local:9000"
+  delegation_timeout_seconds: 300
+
+  # Optional — MCP servers to connect at boot (static URIs; MCP Registry in MVP 3)
+  mcp_servers:
+    - "http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080"
+
+  # Optional — K8s Secrets to mount as envFrom (secret must exist in the agent namespace)
+  env_secrets:
+    - "my-credentials"
+
+  # Optional — background triggers (fire autonomously without a user message)
+  triggers:
+    - type: timer
+      interval_seconds: 30
+      message: "Check if http://my-service/health is healthy."
+    - type: cron
+      cron: "0 9 * * 1-5"
+      message: "Send the daily standup summary."
+    - type: webhook
+      path: "/trigger/my-event"
+      message: "Handle incoming event."
+
+llm:
+  provider: "watsonx"                   # watsonx | ollama (MVP 2)
+  protocol: "watsonx"                   # watsonx | openai | ollama (MVP 2)
+  model: "openai/gpt-oss-120b"
+  project_id: "<your-watsonx-project-id>"
+  url: "https://us-south.ml.cloud.ibm.com"
 ```
 
-### 5. Forward the port
+### Secret
 
-Once the Pod is running, forward port `8000` to your local machine.
-
-First, get the namespace and pod name:
-
-```bash
-# List namespaces
-kubectl get namespaces
-
-# List pods in the target namespace
-kubectl get pods -n <namespace>
-```
-
-Then start the port-forward:
-
-```bash
-kubectl port-forward pod/<pod name> 8000:8000 -n <namespace>
-```
-
-### 6. Chat with the agent
-
-With the port forward active, use the same `curl` commands as in the Quick Start section:
-
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What can you do?"}'
-```
+| Variable | Required | Description |
+|---|:---:|---|
+| `WATSONX_API_KEY` | ✅ | IBM Cloud API key — the only secret the container needs |
 
 ---
 
-## Configuration Details
+## Embedded Tools
 
-The agent resolves settings in this priority order (highest wins):
+Tools declared in `agent.enabled_skills` are registered into the LangGraph tool node at boot.
 
-```
-environment variables / .env  >  config.yaml  >  built-in defaults
-```
-
-### Secret (required)
-
-| Variable | Description |
+| Tool ID | Description |
 |---|---|
-| `WATSONX_API_KEY` | IBM Cloud API key used to authenticate against WatsonX |
-
-### `config.yaml` keys and their env-var overrides
-
-Every `config.yaml` key can be overridden at runtime by the corresponding environment variable without touching the file or rebuilding the image:
-
-| `config.yaml` key | Env-var override | Description |
-|---|---|---|
-| `agent.id` | `AGENT_ID` | Unique identifier for this agent instance |
-| `agent.name` | `AGENT_NAME` | Human-readable agent name |
-| `agent.description` | `AGENT_DESCRIPTION` | Short description shown in the A2A Agent Card |
-| `agent.endpoint` | `AGENT_ENDPOINT` | Public URL of this container |
-| `agent.system_prompt` | `AGENT_SYSTEM_PROMPT` | System prompt that defines the agent persona |
-| `agent.enabled_skills` | `AGENT_ENABLED_SKILLS` | Comma-separated list of skill IDs to activate (e.g. `bash,http_check`) |
-| `llm.url` | `URL` | WatsonX service URL |
-| `llm.project_id` | `PROJECT_ID` | WatsonX project ID |
-| `llm.model` | `MODEL` | Model identifier (e.g. `openai/gpt-oss-120b`) |
-
-### Available Tools
-
-| Tool ID | Function | Description |
-|---|---|---|
-| `bash` | `execute_bash_command` | Runs a shell command; returns stdout/stderr |
-| `http_check` | `http_health_check` | HTTP GET to a URL; returns status code and body excerpt |
+| `bash` | Executes a shell command inside the container; returns stdout/stderr |
+| `http_check` | HTTP GET to a URL; returns status code and first 200 chars of body |
+| `delegate` | Delegates a task to another agent via the Control Plane A2A broker |
 
 ---
 
-## API
+## API Reference
+
+👉 **[docs/APIReference.md](docs/APIReference.md)** — full endpoint reference with request/response schemas.
+
+**Endpoint summary:**
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/.well-known/agent.json` | A2A Agent Card |
-| `POST` | `/a2a/tasks/send` | Receive an A2A task from a peer agent |
-| `POST` | `/chat` | Human-facing synchronous chat endpoint |
-| `WS` | `/ws/chat` | Human-facing streaming chat endpoint |
+| `POST` | `/a2a/tasks/send` | Receive an inbound A2A task from a peer agent |
+| `WS` | `/ws/chat` | Streaming chat (token-by-token, terminates with `[DONE]`) |
 | `GET` | `/health` | Liveness probe |
-
-Full API reference: [docs/GolemRunner.md](docs/GolemRunner.md)
 
 ---
 
@@ -269,45 +151,48 @@ Full API reference: [docs/GolemRunner.md](docs/GolemRunner.md)
 
 ```
 golem-runner/
-├── Dockerfile                    # uv-based image, python:3.12-slim
-├── app.sh                        # Dev launcher — loads .env, checks WATSONX_API_KEY, starts uvicorn
-├── pyproject.toml                # Project metadata, dependencies, ruff & pytest config
-├── uv.lock                       # Reproducible dependency lockfile (managed by uv)
-├── .python-version               # Pins Python 3.12 for all tools and runtimes
-├── .pre-commit-config.yaml       # Pre-commit hooks: linting, formatting, secret detection
-├── .dockerignore                 # Files excluded from the Docker build context
-├── .gitignore                    # Files excluded from version control
-├── .secrets.baseline             # detect-secrets baseline (tolerated false positives)
-└── src/golem-runner/
-    ├── main.py                   # FastAPI server — /chat, /ws/chat, /a2a/tasks/send, and /health endpoints
-    ├── agent.py                  # LangGraph dynamic graph built from settings at startup
-    ├── config.yaml               # Non-secret configuration (agent identity, model, skills)
-    ├── .env.example              # Template for local secrets — copy to .env and fill in
-    ├── tools/
-    │   ├── system_tools.py       # Tool: execute_bash_command
-    │   └── http_tools.py         # Tool: http_health_check
-    └── core/
-        └── config.py             # Pydantic Settings — merges config.yaml + env vars
+├── Dockerfile                         # uv-based image, python:3.12-slim, port 8000
+├── app.sh                             # Local dev launcher — loads .env, starts uvicorn with reload
+├── build_images.sh                    # Build golem-runner image locally (Podman/Docker)
+├── delete_images.sh                   # Remove local golem-runner image
+├── pyproject.toml                     # Dependencies, ruff, pytest config
+├── uv.lock                            # Reproducible lockfile
+├── minikube/
+│   ├── load_images.sh                 # Load image into Minikube internal registry
+│   └── delete_images.sh               # Remove image from Minikube
+├── src/
+│   ├── golem-runner/
+│   │   ├── main.py                    # FastAPI app — /ws/chat, /a2a/tasks/send, /health
+│   │   ├── agent.py                   # LangGraph agentic loop, tool binding, AGENTS.md + SKILL.md injection
+│   │   ├── config.yaml                # Default runner configuration
+│   │   ├── .env.example               # Secrets template — copy to .env and fill in
+│   │   ├── core/
+│   │   │   └── config.py              # Pydantic Settings — merges config.yaml + env vars
+│   │   └── tools/
+│   │       ├── system_tools.py        # Tool: execute_bash_command (bash)
+│   │       ├── http_tools.py          # Tool: http_health_check (http_check)
+│   │       └── a2a_tools.py           # Tool: delegate_to_agent (delegate)
+│   ├── golem_agent_sdk/               # A2A lifecycle, Agent Card, trigger scheduler, task store
+│   │   ├── models.py
+│   │   ├── router.py
+│   │   ├── store.py
+│   │   └── trigger_scheduler.py
+│   └── golem_framework/               # LLM Gateway abstraction (WatsonX; Ollama + OpenAI in MVP 2)
+├── examples/                          # Runnable demo agents (see docs/Demos.md in Control Plane)
+│   ├── demo-chatbot/
+│   ├── demo-sre/
+│   ├── demo-doc/
+│   ├── demo-monitor/
+│   ├── demo-a2a/
+│   └── demo-architecture/
+├── docs/
+│   ├── APIReference.md                # Runner REST & WebSocket API reference
+│   └── img/
+└── tests/
 ```
-
----
-
-## Extending the Tool Catalogue
-
-1. Add a new `@tool`-decorated function in `src/golem-runner/tools/` (e.g. `tools/db_tools.py`).
-2. Register it in the `TOOL_REGISTRY` dict in `agent.py`.
-3. Add its key to `config.yaml` under `agent.enabled_skills`.
-
-No changes to `main.py` or the Dockerfile are needed.
-
----
-
-## Roadmap
-
-See [docs/Roadmap.md](docs/Roadmap.md).
 
 ---
 
 ## License
 
-MIT
+This project is licensed under the MIT License. See [`LICENSE.md`](LICENSE.md) for details.
