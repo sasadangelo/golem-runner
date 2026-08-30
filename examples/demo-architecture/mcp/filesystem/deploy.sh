@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$SCRIPT_DIR/../../agent"
 
 # Build custom image with supergateway and load into minikube
-podman build -t mcp/filesystem-http:latest "$SCRIPT_DIR"
-podman save mcp/filesystem-http:latest -o /tmp/mcp-filesystem-http.tar
+podman build -t localhost/mcp-filesystem-http:latest "$SCRIPT_DIR"
+podman save localhost/mcp-filesystem-http:latest -o /tmp/mcp-filesystem-http.tar
 minikube image load --overwrite /tmp/mcp-filesystem-http.tar
 rm -f /tmp/mcp-filesystem-http.tar
 

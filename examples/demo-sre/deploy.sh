@@ -13,6 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLI_DIR="$(cd "$RUNNER_DIR/../golem-cli" && pwd)"
+AGENT_ID="demo-sre-001"   # must match agent.id in agent/config.yaml
 
 cd "$CLI_DIR"
 golem agent create \
@@ -21,3 +22,12 @@ golem agent create \
   --skill     "$SCRIPT_DIR/agent/skills/check-health.md" \
   --skill     "$SCRIPT_DIR/agent/skills/inspect-env.md" \
   --skill     "$SCRIPT_DIR/agent/skills/inspect-k8s.md"
+
+echo ""
+echo "✅ Agent '$AGENT_ID' deployed."
+echo ""
+echo "   Wait for the pod to be ready:"
+echo "     golem agent status --id $AGENT_ID"
+echo ""
+echo "   Open a chat session:"
+echo "     golem chat --id $AGENT_ID"

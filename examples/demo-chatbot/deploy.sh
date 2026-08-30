@@ -17,13 +17,6 @@ CLI_DIR="$(cd "$RUNNER_DIR/../golem-cli" && pwd)"
 AGENT_ID="demo-chatbot-001"   # must match agent.id in agent/config.yaml
 
 # ---------------------------------------------------------------------------
-# Create the agent namespace
-# ---------------------------------------------------------------------------
-
-kubectl create namespace "$AGENT_ID" --dry-run=client -o yaml | kubectl apply -f -
-echo "==> Namespace '$AGENT_ID' ready"
-
-# ---------------------------------------------------------------------------
 # Deploy the agent via the Golem CLI
 # ---------------------------------------------------------------------------
 

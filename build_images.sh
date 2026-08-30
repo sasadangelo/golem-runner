@@ -9,14 +9,14 @@
 #   ./build_images.sh [TAG]
 #
 # Examples:
-#   ./build_images.sh          # builds localhost/golem-runner:v1
-#   ./build_images.sh v2       # builds localhost/golem-runner:v2
+#   ./build_images.sh          # builds localhost/golem-runner:v0.0.1
+#   ./build_images.sh v0.0.2       # builds localhost/golem-runner:v0.0.2
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TAG="${1:-v1}"
+TAG="${1:-v0.0.1}"
 IMAGE="localhost/golem-runner:${TAG}"
 
 echo "==> Building ${IMAGE}"

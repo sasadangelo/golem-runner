@@ -40,12 +40,7 @@ http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080
 ## Step 2 — Deploy the agent (10 seconds)
 
 ```bash
-golem agent create \
-  --config   examples/demo-sre/agent/config.yaml \
-  --agents-md examples/demo-sre/agent/AGENTS.md \
-  --skill    examples/demo-sre/agent/skills/check-health.md \
-  --skill    examples/demo-sre/agent/skills/inspect-env.md \
-  --skill    examples/demo-sre/agent/skills/inspect-k8s.md
+examples/demo-sre/deploy.sh
 ```
 
 Expected output:

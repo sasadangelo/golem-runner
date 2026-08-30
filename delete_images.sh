@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-TAG="${1:-v1}"
+TAG="${1:-v0.0.1}"
 IMAGE="localhost/golem-runner:${TAG}"
 
 echo "==> Deleting local Podman/Docker image: ${IMAGE}"

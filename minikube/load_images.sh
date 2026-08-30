@@ -9,8 +9,8 @@
 #   ./minikube/load_images.sh [TAG]
 #
 # Examples:
-#   ./minikube/load_images.sh        # loads localhost/golem-runner:v1
-#   ./minikube/load_images.sh v2     # loads localhost/golem-runner:v2
+#   ./minikube/load_images.sh         # loads localhost/golem-runner:v0.0.1
+#   ./minikube/load_images.sh v0.0.2  # loads localhost/golem-runner:v0.0.2
 #
 # Prerequisites:
 #   - Minikube must be running  (minikube status)
@@ -19,7 +19,7 @@
 
 set -euo pipefail
 
-TAG="${1:-v1}"
+TAG="${1:-v0.0.1}"
 IMAGE="localhost/golem-runner:${TAG}"
 ARCHIVE="/tmp/golem-runner-${TAG}.tar"
 
