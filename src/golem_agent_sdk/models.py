@@ -2,7 +2,20 @@
 # Copyright (c) 2026 Salvatore D'Angelo, Code4Projects
 # Licensed under the MIT License. See LICENSE.md for details.
 # -----------------------------------------------------------------------------
-"""A2A task lifecycle domain models for golem-agent-sdk."""
+"""A2A task lifecycle and Automation domain models for golem-agent-sdk.
+
+Domain alignment
+----------------
+``Automation``  — the entity the user creates and manages (has identity,
+                  lifecycle, enabled flag).
+``Trigger``     — value object embedded inside an Automation that carries
+                  only the *firing rule* (when to fire, not what to do).
+
+The three concrete trigger types are:
+  CronTrigger     — fires on a 5-field UTC cron expression.
+  TimerTrigger    — fires every ``interval_seconds``.
+  WebhookTrigger  — fires on an HTTP POST to a dynamic route.
+"""
 
 import uuid
 from datetime import UTC, datetime
@@ -10,6 +23,10 @@ from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+# ---------------------------------------------------------------------------
+# A2A task lifecycle
+# ---------------------------------------------------------------------------
 
 
 class TaskStatus(StrEnum):
@@ -37,39 +54,60 @@ class A2ATask(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Background trigger models (Cron, Timer, Webhook)
+# Trigger value objects — the *firing rule* embedded inside an Automation
 # ---------------------------------------------------------------------------
 
 
 class CronTrigger(BaseModel):
-    """Schedule a task on a cron expression (UTC)."""
+    """Schedule an Automation on a cron expression (UTC)."""
 
     type: Literal["cron"] = "cron"
-    id: str = Field(default_factory=lambda: f"trig-{uuid.uuid4().hex[:8]}")
     cron: str = Field(description="Standard 5-field cron expression in UTC, e.g. '*/30 * * * *'.")
-    message: str = Field(description="Instruction text passed to the agent when the trigger fires.")
-    enabled: bool = Field(default=True, description="Set to false to pause without deleting.")
 
 
 class TimerTrigger(BaseModel):
-    """Fire a task after a fixed delay, then repeat every interval_seconds."""
+    """Fire an Automation after a fixed interval, then repeat every interval_seconds."""
 
     type: Literal["timer"] = "timer"
-    id: str = Field(default_factory=lambda: f"trig-{uuid.uuid4().hex[:8]}")
     interval_seconds: int = Field(gt=0, description="Seconds between each firing.")
-    message: str = Field(description="Instruction text passed to the agent when the trigger fires.")
-    enabled: bool = Field(default=True, description="Set to false to pause without deleting.")
 
 
 class WebhookTrigger(BaseModel):
-    """Expose an HTTP endpoint that fires a task on POST."""
+    """Expose an HTTP endpoint that fires an Automation on POST."""
 
     type: Literal["webhook"] = "webhook"
-    id: str = Field(default_factory=lambda: f"trig-{uuid.uuid4().hex[:8]}")
     path: str = Field(description="URL path suffix, e.g. '/webhooks/github'. Must start with '/'.")
-    message: str = Field(description="Instruction template; use {body} to inject the raw request body.")
-    enabled: bool = Field(default=True, description="Set to false to pause without deleting.")
 
 
-# Union type used in the router / scheduler
+# Union type used by Automation.trigger and the scheduler
 TriggerConfig = CronTrigger | TimerTrigger | WebhookTrigger
+
+
+# ---------------------------------------------------------------------------
+# Automation entity
+# ---------------------------------------------------------------------------
+
+
+class Automation(BaseModel):
+    """A background automation rule attached to an Agent.
+
+    Fires a task on the agent according to its Trigger (cron, timer, or
+    webhook) without requiring human input.
+
+    Attributes:
+        automation_id: Stable unique identifier for this automation.
+        name:          Human-readable label (e.g. "health-check every 30s").
+        trigger:       The firing rule — a CronTrigger, TimerTrigger, or
+                       WebhookTrigger value object.
+        task_input:    The instruction text sent to the agent when the
+                       automation fires.
+        enabled:       Set to False to pause the automation without deleting it.
+    """
+
+    automation_id: str = Field(default_factory=lambda: f"auto-{uuid.uuid4().hex[:8]}")
+    name: str = Field(default="", description="Human-readable label for this automation.")
+    trigger: CronTrigger | TimerTrigger | WebhookTrigger = Field(
+        description="The firing rule — discriminated by the 'type' field.",
+    )
+    task_input: str = Field(description="Instruction text passed to the agent when the automation fires.")
+    enabled: bool = Field(default=True, description="Set to false to pause without deleting.")

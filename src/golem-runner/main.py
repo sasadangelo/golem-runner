@@ -20,10 +20,10 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 from core.config import MCPServerConfig, settings
+from golem_agent_sdk.automation_scheduler import AutomationScheduler
 from golem_agent_sdk.card import AgentCard, build_agent_card
 from golem_agent_sdk.handshake import perform_handshake
 from golem_agent_sdk.router import build_a2a_router, task_store
-from golem_agent_sdk.trigger_scheduler import TriggerScheduler
 
 # ---------------------------------------------------------------------------
 # Logging — configure all runner.* loggers to appear in stdout alongside uvicorn
@@ -137,14 +137,14 @@ async def _load_mcp_tools() -> list[BaseTool]:
 
 
 # ---------------------------------------------------------------------------
-# Lifespan: MCP boot + handshake + trigger scheduler
+# Lifespan: MCP boot + handshake + automation scheduler
 # ---------------------------------------------------------------------------
 
 # Module-level reference; set during lifespan so all endpoint handlers share it.
 agent_executor: CompiledStateGraph | None = None
 
 # Module-level scheduler; set during lifespan so the router can reference it.
-trigger_scheduler: TriggerScheduler | None = None
+automation_scheduler: AutomationScheduler | None = None
 
 # ---------------------------------------------------------------------------
 # Conversation history store — keyed by conversation_id (str).
@@ -155,8 +155,8 @@ _conversation_histories: dict[str, list[BaseMessage]] = {}
 
 @asynccontextmanager
 async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
-    """FastAPI lifespan: load MCP tools, compile agent, start triggers, handshake."""
-    global agent_executor, trigger_scheduler, agent_card  # noqa: PLW0603
+    """FastAPI lifespan: load MCP tools, compile agent, start automations, handshake."""
+    global agent_executor, automation_scheduler, agent_card  # noqa: PLW0603
 
     mcp_tools: list[BaseTool] = await _load_mcp_tools()
     agent_executor = build_agent(mcp_tools=mcp_tools)
@@ -171,40 +171,49 @@ async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
         card=agent_card.to_dict(),
     )
 
-    # Start background trigger scheduler
-    trigger_scheduler = TriggerScheduler(executor=_langgraph_executor, task_store=task_store)
-    _seed_triggers_from_config(scheduler=trigger_scheduler)
-    await trigger_scheduler.start(app=app_)
-    logger.info("TriggerScheduler started with %d trigger(s)", len(trigger_scheduler.list_all()))
+    # Start background automation scheduler
+    automation_scheduler = AutomationScheduler(executor=_langgraph_executor, task_store=task_store)
+    _seed_automations_from_config(scheduler=automation_scheduler)
+    await automation_scheduler.start(app=app_)
+    logger.info("AutomationScheduler started with %d automation(s)", len(automation_scheduler.list_all()))
 
     try:
         yield
     finally:
-        await trigger_scheduler.stop()
+        await automation_scheduler.stop()
 
 
-def _seed_triggers_from_config(scheduler: TriggerScheduler) -> None:
-    """Register triggers declared in config.yaml under ``agent.triggers``.
+def _seed_automations_from_config(scheduler: AutomationScheduler) -> None:
+    """Register automations declared in config.yaml under ``agent.triggers``.
 
-    Each entry must have a ``type`` field (``cron``, ``timer``, or ``webhook``).
-    Invalid entries are logged as warnings and skipped.
+    The YAML key ``triggers`` is preserved for backwards compatibility.
+    Each entry must have a ``type`` field (``cron``, ``timer``, or ``webhook``)
+    and a ``task_input`` field. Invalid entries are logged as warnings and skipped.
     """
-    from golem_agent_sdk.models import CronTrigger, TimerTrigger, WebhookTrigger
+    from golem_agent_sdk.models import Automation, CronTrigger, TimerTrigger, WebhookTrigger
 
     triggers_cfg = getattr(settings.agent, "triggers", None) or []
     for raw in triggers_cfg:
         try:
-            trigger_type = raw.get("type") if isinstance(raw, dict) else None
+            if not isinstance(raw, dict):
+                logger.warning("Invalid automation config (not a dict): %s — skipping", raw)
+                continue
+            trigger_type = raw.get("type")
+            task_input = raw.get("task_input", "")
+            name = raw.get("name", "")
+            enabled = raw.get("enabled", True)
             if trigger_type == "cron":
-                scheduler.register(CronTrigger(**raw))
+                trigger = CronTrigger(cron=raw["cron"])
             elif trigger_type == "timer":
-                scheduler.register(TimerTrigger(**raw))
+                trigger = TimerTrigger(interval_seconds=raw["interval_seconds"])
             elif trigger_type == "webhook":
-                scheduler.register(WebhookTrigger(**raw))
+                trigger = WebhookTrigger(path=raw["path"])
             else:
-                logger.warning("Unknown trigger type in config: %s — skipping", raw)
+                logger.warning("Unknown automation type in config: %s — skipping", raw)
+                continue
+            scheduler.register(Automation(name=name, trigger=trigger, task_input=task_input, enabled=enabled))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Invalid trigger config %s — skipping: %s", raw, exc)
+            logger.warning("Invalid automation config %s — skipping: %s", raw, exc)
 
 
 app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0", lifespan=lifespan)
@@ -219,7 +228,7 @@ async def well_known_middleware(request: Request, call_next: Any) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# A2A router (including trigger endpoints)
+# A2A router (including automation endpoints)
 # ---------------------------------------------------------------------------
 
 
@@ -231,23 +240,16 @@ def _langgraph_executor(text: str) -> str:
     return str(result["messages"][-1].content)
 
 
-# Build the router with a deferred scheduler reference so the router is
-# registered during module import (before lifespan runs) yet uses the
-# scheduler that is set inside lifespan.
-def _get_scheduler() -> TriggerScheduler | None:
-    return trigger_scheduler
-
-
 # We mount the router immediately; the scheduler is None at import time but
-# will be set in lifespan before any request can reach the trigger endpoints.
+# will be set in lifespan before any request can reach the automation endpoints.
 # We pass a proxy that always reads the module-level variable.
 class _SchedulerProxy:
     """Lazy proxy forwarding all attribute access to the module-level scheduler."""
 
     def __getattr__(self, name: str) -> Any:
-        if trigger_scheduler is None:
-            raise RuntimeError("TriggerScheduler not initialised yet.")
-        return getattr(trigger_scheduler, name)
+        if automation_scheduler is None:
+            raise RuntimeError("AutomationScheduler not initialised yet.")
+        return getattr(automation_scheduler, name)
 
 
 _scheduler_proxy: _SchedulerProxy = _SchedulerProxy()

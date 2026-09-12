@@ -2,26 +2,36 @@
 # Copyright (c) 2026 Salvatore D'Angelo, Code4Projects
 # Licensed under the MIT License. See LICENSE.md for details.
 # -----------------------------------------------------------------------------
-"""golem-framework — LLM framework abstraction, LLM Gateway, and Graph Plugin system.
+"""golem-framework — LLM framework abstraction, agentic loop, and skill loading.
 
-Phase 2 placeholder.  In the MVP all framework logic lives directly in
-``golem-runner/agent.py`` (LangGraph loop + WatsonX client).  This package
-will be populated in Phase 2 when the runner is split into three repositories:
+This package provides the AgentLoop abstraction over LLM agentic backends
+(currently LangGraph + WatsonX) so the runner remains framework-agnostic.
 
-    golem-runner        ← thin entrypoint
-    golem-agent-sdk     ← A2A identity + task lifecycle  (already extracted)
-    golem-framework     ← agentic loop + LLM Gateway + Graph Plugin  (this package)
+Public surface
+--------------
+Loop
+    AgentLoop       Abstract base class — every concrete loop must implement this.
+    LangGraphLoop   Built-in ReAct loop backed by LangGraph + WatsonX (MVP 1).
 
-Sub-modules planned for Phase 2:
-    loop/
-        base.py           abstract AgentLoop interface
-        langgraph.py      built-in ReAct loop (default)
-        plugin.py         custom graph loader from /app/graph/pipeline.py
-        autogen.py        Phase 3
-        crewai.py         Phase 3
-    llm_gateway/
-        base.py           abstract LLMClient interface
-        watsonx.py        provider=watsonx, protocol=watsonx
-        ollama_native.py  provider=ollama,  protocol=ollama
-        ollama_openai.py  provider=ollama,  protocol=openai
+Supporting utilities
+    SkillLoader     Reads Persona (AGENTS.md) and Skills (skills/*.md) at startup.
+    ToolRegistry    Maps built-in tool names to BaseTool instances.
+    resolve_builtin_tools  Helper to resolve a list of tool names to BaseTool objects.
+
+Planned (Phase 3)
+    AutoGenLoop     AutoGen-backed loop.
+    CrewAILoop      CrewAI-backed loop.
 """
+
+from .loop.base import AgentLoop
+from .loop.langgraph import LangGraphLoop
+from .skill_loader import SkillLoader
+from .tool_registry import BUILTIN_TOOLS, resolve_builtin_tools
+
+__all__ = [
+    "AgentLoop",
+    "LangGraphLoop",
+    "SkillLoader",
+    "BUILTIN_TOOLS",
+    "resolve_builtin_tools",
+]

@@ -24,24 +24,33 @@ A2A task lifecycle
     TaskStatus          Lifecycle states (submitted, working, completed, failed).
     TaskStore           In-memory registry of A2A tasks.
 
-Background triggers
-    CronTrigger         Fire a task on a cron expression.
-    TimerTrigger        Fire a task every N seconds.
-    WebhookTrigger      Expose an HTTP POST endpoint that fires a task.
+Automations
+    Automation          Entity: a background automation rule (id, name, trigger, task_input, enabled).
+    CronTrigger         Value object: fires on a cron expression.
+    TimerTrigger        Value object: fires every N seconds.
+    WebhookTrigger      Value object: fires on HTTP POST.
     TriggerConfig       Union type for all trigger kinds.
-    TriggerScheduler    In-process scheduler for Cron, Timer, and Webhook triggers.
+    AutomationScheduler In-process scheduler for Cron, Timer, and Webhook automations.
 
 FastAPI router
     a2a_router          Default placeholder router (replaced at startup).
     build_a2a_router    Factory that wires executor + scheduler into an APIRouter.
 """
 
+from .automation_scheduler import AutomationScheduler
 from .card import AgentCapabilities, AgentCard, AgentTools, ToolEntry, build_agent_card
 from .handshake import perform_handshake
-from .models import A2ATask, CronTrigger, TaskStatus, TimerTrigger, TriggerConfig, WebhookTrigger
+from .models import (
+    A2ATask,
+    Automation,
+    CronTrigger,
+    TaskStatus,
+    TimerTrigger,
+    TriggerConfig,
+    WebhookTrigger,
+)
 from .router import a2a_router, build_a2a_router
 from .store import TaskStore
-from .trigger_scheduler import TriggerScheduler
 
 __all__ = [
     # Agent Card
@@ -56,11 +65,12 @@ __all__ = [
     "A2ATask",
     "TaskStatus",
     "TaskStore",
-    # Triggers
+    # Automations
+    "Automation",
+    "AutomationScheduler",
     "CronTrigger",
     "TimerTrigger",
     "TriggerConfig",
-    "TriggerScheduler",
     "WebhookTrigger",
     # Router
     "a2a_router",

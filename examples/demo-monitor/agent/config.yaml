@@ -38,7 +38,7 @@ agent:
   triggers:
     - type: timer
       interval_seconds: 30
-      message: "Check if http://mock-service.demo-monitor.svc.cluster.local:8080/health is healthy."
+      task_input: "Check if http://mock-service.demo-monitor.svc.cluster.local:8080/health is healthy."
 
 llm:
   provider: "watsonx"

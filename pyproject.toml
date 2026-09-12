@@ -33,7 +33,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/golem-runner"]
+packages = ["src/golem-runner", "src/golem_agent_sdk", "src/golem_framework"]
 
 [tool.ruff]
 line-length = 120

@@ -68,8 +68,8 @@ def client() -> TestClient:
     TaskStore reset to empty state for each test.
 
     The lifespan is simplified by patching:
-    - ``main._load_mcp_tools`` → returns [] (no real MCP connections)
-    - ``agent.build_agent`` → returns a MagicMock compiled graph
+    - ``main._load_mcp_tools``                        → returns [] (no real MCP connections)
+    - ``agent.build_agent``                           → returns a MagicMock compiled graph
     - ``golem_agent_sdk.handshake.perform_handshake`` → no-op (no real HTTP calls)
     """
     # Ensure a fresh import of main and agent for each fixture use

@@ -2,23 +2,23 @@
 # Copyright (c) 2026 Salvatore D'Angelo, Code4Projects
 # Licensed under the MIT License. See LICENSE.md for details.
 # -----------------------------------------------------------------------------
-"""FastAPI router for A2A inbound task endpoints and background trigger management.
+"""FastAPI router for A2A inbound task endpoints and Automation management.
 
 This router is mounted by the runner's main.py.  It owns:
 
   A2A task lifecycle:
-    POST /a2a/tasks/send       receive an inbound task, execute it, return result
-    GET  /a2a/tasks/{task_id}  query a single task
-    GET  /a2a/tasks            list all tasks
+    POST /a2a/tasks/send          receive an inbound task, execute it, return result
+    GET  /a2a/tasks/{task_id}     query a single task
+    GET  /a2a/tasks               list all tasks
 
-  Background triggers (Cron, Timer, Webhook):
-    POST   /a2a/triggers       register a new trigger
-    GET    /a2a/triggers        list all triggers
-    GET    /a2a/triggers/{id}   get a single trigger
-    DELETE /a2a/triggers/{id}   remove a trigger
+  Automation management (Cron, Timer, Webhook):
+    POST   /a2a/automations       register a new automation
+    GET    /a2a/automations       list all automations
+    GET    /a2a/automations/{id}  get a single automation
+    DELETE /a2a/automations/{id}  remove an automation
 
-The router receives an ``executor`` callable and a ``TriggerScheduler`` instance
-at mount time so it stays completely decoupled from LangGraph.
+The router receives an ``executor`` callable and an ``AutomationScheduler``
+instance at mount time so it stays completely decoupled from LangGraph.
 """
 
 from __future__ import annotations
@@ -33,11 +33,16 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
-from golem_agent_sdk.models import A2ATask, CronTrigger, TimerTrigger, TriggerConfig, WebhookTrigger
+from golem_agent_sdk.models import (
+    Automation,
+    CronTrigger,
+    TimerTrigger,
+    WebhookTrigger,
+)
 
+from .automation_scheduler import AutomationScheduler
 from .models import TaskStatus
 from .store import TaskStore
-from .trigger_scheduler import TriggerScheduler
 
 # ---------------------------------------------------------------------------
 # Shared task store — one instance per process, injected into the router at
@@ -90,32 +95,70 @@ class TaskStatusResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Trigger response schema
+# Automation response schema
 # ---------------------------------------------------------------------------
 
 
-class TriggerResponse(BaseModel):
-    """Response shape for trigger endpoints."""
+class AutomationResponse(BaseModel):
+    """Response shape for Automation endpoints."""
 
-    id: str
-    type: str
+    automation_id: str
+    name: str
     enabled: bool
-    message: str
+    task_input: str
+    # trigger type
+    trigger_type: str
     # type-specific fields (optional)
     cron: str | None = None
     interval_seconds: int | None = None
     path: str | None = None
 
 
-def _trigger_to_response(t: TriggerConfig) -> TriggerResponse:
-    base = TriggerResponse(id=t.id, type=t.type, enabled=t.enabled, message=t.message)
-    if isinstance(t, CronTrigger):
-        base.cron = t.cron
-    elif isinstance(t, TimerTrigger):
-        base.interval_seconds = t.interval_seconds
-    elif isinstance(t, WebhookTrigger):
-        base.path = t.path
-    return base
+def _automation_to_response(a: Automation) -> AutomationResponse:
+    """Convert an Automation domain object to its API response shape."""
+    resp = AutomationResponse(
+        automation_id=a.automation_id,
+        name=a.name,
+        enabled=a.enabled,
+        task_input=a.task_input,
+        trigger_type=a.trigger.type,
+    )
+    if isinstance(a.trigger, CronTrigger):
+        resp.cron = a.trigger.cron
+    elif isinstance(a.trigger, TimerTrigger):
+        resp.interval_seconds = a.trigger.interval_seconds
+    elif isinstance(a.trigger, WebhookTrigger):
+        resp.path = a.trigger.path
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Automation creation request schema
+# ---------------------------------------------------------------------------
+
+
+class _CronAutomationRequest(BaseModel):
+    """Create request for a cron-based automation."""
+
+    name: str = ""
+    task_input: str
+    trigger: CronTrigger
+
+
+class _TimerAutomationRequest(BaseModel):
+    """Create request for a timer-based automation."""
+
+    name: str = ""
+    task_input: str
+    trigger: TimerTrigger
+
+
+class _WebhookAutomationRequest(BaseModel):
+    """Create request for a webhook-based automation."""
+
+    name: str = ""
+    task_input: str
+    trigger: WebhookTrigger
 
 
 # ---------------------------------------------------------------------------
@@ -125,15 +168,15 @@ def _trigger_to_response(t: TriggerConfig) -> TriggerResponse:
 
 def build_a2a_router(
     executor: Callable[[str], str],
-    scheduler: TriggerScheduler | None = None,
+    scheduler: AutomationScheduler | None = None,
 ) -> APIRouter:
-    """Return an APIRouter with A2A task endpoints and trigger management.
+    """Return an APIRouter with A2A task endpoints and Automation management.
 
     Args:
         executor:  A callable that takes an instruction string and returns the
                    agent's reply string.  Injected by the runner at startup.
-        scheduler: Optional TriggerScheduler instance.  When provided, the
-                   /a2a/triggers endpoints are exposed.
+        scheduler: Optional AutomationScheduler instance.  When provided, the
+                   /a2a/automations endpoints are exposed.
 
     Returns:
         A configured FastAPI APIRouter ready to be included in the main app.
@@ -146,8 +189,7 @@ def build_a2a_router(
 
     @router.post(path="/tasks/send", response_model=A2ATaskResponse, status_code=200)
     async def tasks_send(params: A2ASendRequest) -> A2ATaskResponse:
-        """
-        Receive an inbound A2A task, execute it and return the result.
+        """Receive an inbound A2A task, execute it and return the result.
 
         The executor runs in a thread pool so the event loop is never blocked.
         The response is returned only when execution completes or fails.
@@ -165,6 +207,8 @@ def build_a2a_router(
         )
         if not text:
             raise HTTPException(status_code=400, detail="No text part found in A2A message.")
+
+        from golem_agent_sdk.models import A2ATask
 
         task: A2ATask = A2ATask(
             task_id=params.id or f"task-{uuid.uuid4().hex[:12]}",
@@ -195,12 +239,13 @@ def build_a2a_router(
 
     @router.get(path="/tasks/{task_id}", response_model=TaskStatusResponse)
     async def get_task(task_id: str) -> TaskStatusResponse:
-        """
-        Return the current lifecycle state of an A2A task.
+        """Return the current lifecycle state of an A2A task.
 
         Args:
             task_id: The unique task identifier.
         """
+        from golem_agent_sdk.models import A2ATask
+
         task: A2ATask | None = task_store.get(task_id)
         if task is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
@@ -231,55 +276,62 @@ def build_a2a_router(
         ]
 
     # ------------------------------------------------------------------
-    # Trigger management endpoints  (only when a scheduler is provided)
+    # Automation management endpoints  (only when a scheduler is provided)
     # ------------------------------------------------------------------
 
     if scheduler is not None:
 
-        @router.post(path="/triggers", response_model=TriggerResponse, status_code=201)
-        async def create_trigger(
-            trigger: Annotated[CronTrigger | TimerTrigger | WebhookTrigger, Body(discriminator="type")],
-        ) -> TriggerResponse:
-            """
-            Register a new background trigger.
+        @router.post(path="/automations", response_model=AutomationResponse, status_code=201)
+        async def create_automation(
+            body: Annotated[
+                _CronAutomationRequest | _TimerAutomationRequest | _WebhookAutomationRequest,
+                Body(),
+            ],
+        ) -> AutomationResponse:
+            """Register a new background Automation.
 
-            Accepts ``type: cron``, ``type: timer``, or ``type: webhook``.
-
-            Args:
-                trigger: The trigger configuration.
-            """
-            scheduler.register(trigger)
-            await scheduler._start_trigger(trigger)  # noqa: SLF001
-            return _trigger_to_response(trigger)
-
-        @router.get(path="/triggers", response_model=list[TriggerResponse])
-        async def list_triggers() -> list[TriggerResponse]:
-            """Return all registered triggers."""
-            return [_trigger_to_response(t) for t in scheduler.list_all()]
-
-        @router.get(path="/triggers/{trigger_id}", response_model=TriggerResponse)
-        async def get_trigger(trigger_id: str) -> TriggerResponse:
-            """
-            Return a single trigger by ID.
+            The request body must include a ``trigger`` object with
+            ``type: cron``, ``type: timer``, or ``type: webhook``, plus a
+            ``task_input`` string and an optional ``name``.
 
             Args:
-                trigger_id: The unique trigger identifier.
+                body: The automation creation request.
             """
-            t: TriggerConfig | None = scheduler.get(trigger_id)
-            if t is None:
-                raise HTTPException(status_code=404, detail=f"Trigger {trigger_id} not found.")
-            return _trigger_to_response(t)
+            automation = Automation(
+                name=body.name,
+                trigger=body.trigger,
+                task_input=body.task_input,
+            )
+            scheduler.register(automation)
+            await scheduler._start_automation(automation)  # noqa: SLF001
+            return _automation_to_response(automation)
 
-        @router.delete(path="/triggers/{trigger_id}", status_code=204)
-        async def delete_trigger(trigger_id: str) -> None:
-            """
-            Remove and stop a trigger.
+        @router.get(path="/automations", response_model=list[AutomationResponse])
+        async def list_automations() -> list[AutomationResponse]:
+            """Return all registered automations."""
+            return [_automation_to_response(a) for a in scheduler.list_all()]
+
+        @router.get(path="/automations/{automation_id}", response_model=AutomationResponse)
+        async def get_automation(automation_id: str) -> AutomationResponse:
+            """Return a single automation by ID.
 
             Args:
-                trigger_id: The unique trigger identifier.
+                automation_id: The unique automation identifier.
             """
-            if not scheduler.remove(trigger_id):
-                raise HTTPException(status_code=404, detail=f"Trigger {trigger_id} not found.")
+            a: Automation | None = scheduler.get(automation_id)
+            if a is None:
+                raise HTTPException(status_code=404, detail=f"Automation {automation_id} not found.")
+            return _automation_to_response(a)
+
+        @router.delete(path="/automations/{automation_id}", status_code=204)
+        async def delete_automation(automation_id: str) -> None:
+            """Remove and stop an automation.
+
+            Args:
+                automation_id: The unique automation identifier.
+            """
+            if not scheduler.remove(automation_id):
+                raise HTTPException(status_code=404, detail=f"Automation {automation_id} not found.")
 
     return router
 
