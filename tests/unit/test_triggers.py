@@ -45,7 +45,7 @@ def client_with_scheduler() -> Generator[TestClient, None, None]:
     with (
         patch("agent.build_agent", return_value=MagicMock()),
         patch("main._load_mcp_tools", side_effect=_noop_load_mcp_tools),
-        patch("main._register_with_control_plane", side_effect=_noop_handshake),
+        patch("golem_agent_sdk.handshake.perform_handshake", side_effect=_noop_handshake),
     ):
         import main as m
 

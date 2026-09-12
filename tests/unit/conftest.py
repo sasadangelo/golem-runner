@@ -70,7 +70,7 @@ def client() -> TestClient:
     The lifespan is simplified by patching:
     - ``main._load_mcp_tools`` → returns [] (no real MCP connections)
     - ``agent.build_agent`` → returns a MagicMock compiled graph
-    - ``main._register_with_control_plane`` → no-op (no real HTTP calls)
+    - ``golem_agent_sdk.handshake.perform_handshake`` → no-op (no real HTTP calls)
     """
     # Ensure a fresh import of main and agent for each fixture use
     for mod in ("agent", "main"):
@@ -85,7 +85,7 @@ def client() -> TestClient:
     with (
         patch("agent.build_agent", return_value=MagicMock()),
         patch("main._load_mcp_tools", side_effect=_noop_load_mcp_tools),
-        patch("main._register_with_control_plane", side_effect=_noop_handshake),
+        patch("golem_agent_sdk.handshake.perform_handshake", side_effect=_noop_handshake),
     ):
         import main as m
 

@@ -10,7 +10,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
 from agent import build_agent
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -21,6 +20,8 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
 from core.config import MCPServerConfig, settings
+from golem_agent_sdk.card import AgentCard, build_agent_card
+from golem_agent_sdk.handshake import perform_handshake
 from golem_agent_sdk.router import build_a2a_router, task_store
 from golem_agent_sdk.trigger_scheduler import TriggerScheduler
 
@@ -62,45 +63,15 @@ _RECURSION_LIMIT: int = 50
 # A2A Agent Card — served at /.well-known/agent.json (A2A v1.0 spec)
 # ---------------------------------------------------------------------------
 
-AGENT_CARD: dict[str, Any] = {
-    "id": settings.agent.id,
-    "name": settings.agent.name,
-    "description": settings.agent.description,
-    "version": "0.1.0",
-    "endpoint": settings.agent.endpoint,
-    "capabilities": {
-        "streaming": True,
-        "pushNotifications": False,
-    },
-    "skills": [],  # populated at startup after MCP servers are loaded
-    "tools": {
-        "builtin": [{"id": t, "name": t} for t in settings.agent.builtin_tools],
-        "mcp": [],  # populated at startup after MCP servers are loaded
-    },
-}
-
-
-# ---------------------------------------------------------------------------
-# Startup handshake — register Agent Card with the Control Plane broker
-# ---------------------------------------------------------------------------
-
-
-async def _register_with_control_plane(card: dict[str, Any]) -> None:
-    """Push the Agent Card to the Control Plane via POST /agents/{id}/handshake.
-
-    Skipped silently when ``settings.agent.cp_url`` is empty (local dev mode).
-    Logs a warning on failure but never blocks the runner startup.
-    """
-    if not settings.agent.cp_url:
-        return
-    url = f"{settings.agent.cp_url.rstrip('/')}/agents/{settings.agent.id}/handshake"
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url, json={"card": card})
-            response.raise_for_status()
-        logger.info("Handshake completed with Control Plane at %s", settings.agent.cp_url)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Handshake with Control Plane failed (will rely on pull): %s", exc)
+# Built once at module load with values from config; mcp section is completed
+# in lifespan after MCP connections are established.
+agent_card: AgentCard = build_agent_card(
+    agent_id=settings.agent.id,
+    name=settings.agent.name,
+    description=settings.agent.description,
+    endpoint=settings.agent.endpoint,
+    builtin_tools=settings.agent.builtin_tools,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -185,16 +156,20 @@ _conversation_histories: dict[str, list[BaseMessage]] = {}
 @asynccontextmanager
 async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan: load MCP tools, compile agent, start triggers, handshake."""
-    global agent_executor, trigger_scheduler  # noqa: PLW0603
+    global agent_executor, trigger_scheduler, agent_card  # noqa: PLW0603
 
     mcp_tools: list[BaseTool] = await _load_mcp_tools()
     agent_executor = build_agent(mcp_tools=mcp_tools)
     logger.info("Agent compiled — built-in tools + %d MCP tool(s)", len(mcp_tools))
 
     # Populate the MCP section of the Agent Card now that tools are known.
-    AGENT_CARD["tools"]["mcp"] = [{"id": t.name, "name": t.name} for t in mcp_tools]
+    agent_card = agent_card.with_mcp_tools([t.name for t in mcp_tools])
 
-    await _register_with_control_plane(card=AGENT_CARD)
+    await perform_handshake(
+        cp_url=settings.agent.cp_url,
+        agent_id=settings.agent.id,
+        card=agent_card.to_dict(),
+    )
 
     # Start background trigger scheduler
     trigger_scheduler = TriggerScheduler(executor=_langgraph_executor, task_store=task_store)
@@ -239,7 +214,7 @@ app: FastAPI = FastAPI(title="Golem Agent Runner", version="0.1.0", lifespan=lif
 async def well_known_middleware(request: Request, call_next: Any) -> Response:
     """Serve /.well-known/agent.json before Starlette routing drops the request."""
     if request.url.path == "/.well-known/agent.json":
-        return JSONResponse(content=AGENT_CARD)
+        return JSONResponse(content=agent_card.to_dict())
     return await call_next(request)
 
 
