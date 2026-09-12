@@ -47,6 +47,7 @@ def test_agent_loop_subclass_must_implement_all_methods() -> None:
     class Incomplete(AgentLoop):
         def build(self) -> None:
             pass
+
         # missing invoke and astream_events
 
     with pytest.raises(TypeError):
@@ -110,16 +111,21 @@ class TestSkillLoader:
 
 
 def _make_loop(tmp_path: Path, tools: list | None = None) -> Any:
-    """Construct a LangGraphLoop with mocked LLM and optional tools."""
+    """Construct a LangGraphLoop with a mocked LLMClient."""
+    from unittest.mock import MagicMock
+
+    from golem_framework.llm_gateway.base import LLMClient
     from golem_framework.loop.langgraph import LangGraphLoop
     from golem_framework.skill_loader import SkillLoader
 
+    # Minimal LLMClient stub — as_chat_model() returns the mocked ChatModel
+    class _FakeClient(LLMClient):
+        def as_chat_model(self):  # noqa: ANN201
+            return MagicMock()
+
     return LangGraphLoop(
         system_prompt="You are helpful.",
-        llm_model="test-model",
-        llm_url="http://fake",
-        llm_project_id="proj-123",
-        llm_api_key=None,
+        llm_client=_FakeClient(),
         builtin_tools=tools or [],
         skill_loader=SkillLoader(
             agents_md_path=tmp_path / "AGENTS.md",

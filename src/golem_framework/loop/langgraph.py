@@ -2,11 +2,10 @@
 # Copyright (c) 2026 Salvatore D'Angelo, Code4Projects
 # Licensed under the MIT License. See LICENSE.md for details.
 # -----------------------------------------------------------------------------
-"""LangGraphLoop — concrete AgentLoop backed by LangGraph + WatsonX (MVP).
+"""LangGraphLoop — concrete AgentLoop backed by LangGraph.
 
-Implements the ``AgentLoop`` ABC using a ReAct-style LangGraph state machine.
-The LLM is currently always WatsonX; swapping the provider is tracked in the
-roadmap as the LLM Gateway work (MVP 2).
+Accepts any LLMClient from the gateway layer so it is completely
+provider-agnostic: swap WatsonX for Ollama by changing config.yaml only.
 
 Graph topology
 --------------
@@ -17,9 +16,6 @@ With tools::
 Without tools::
 
     START → agent → END
-
-The loop exits when the model produces an AIMessage with no tool calls, or
-when the recursion limit is hit.
 """
 
 from __future__ import annotations
@@ -30,14 +26,13 @@ from typing import Annotated, Any, Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-from langchain_ibm import ChatWatsonx
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
-from pydantic import SecretStr
 from typing_extensions import TypedDict
 
+from golem_framework.llm_gateway.base import LLMClient
 from golem_framework.loop.base import AgentLoop
 from golem_framework.skill_loader import SkillLoader
 
@@ -51,18 +46,14 @@ class _AgentState(TypedDict):
 
 
 class LangGraphLoop(AgentLoop):
-    """ReAct agentic loop built on LangGraph + WatsonX.
+    """ReAct agentic loop built on LangGraph, provider-agnostic via LLMClient.
 
     Args:
-        system_prompt:  Base system prompt from ``config.yaml``.
-        llm_model:      WatsonX model ID.
-        llm_url:        WatsonX service URL.
-        llm_project_id: WatsonX project ID.
-        llm_api_key:    WatsonX API key (resolved from env at construction time).
-        max_new_tokens: Maximum tokens the model may generate per invocation.
-        builtin_tools:  Pre-resolved list of built-in BaseTool instances.
-        mcp_tools:      MCP tool instances loaded at boot from MCP servers.
-        skill_loader:   SkillLoader instance for persona + skill injection.
+        system_prompt:   Base system prompt from ``config.yaml``.
+        llm_client:      Any LLMClient from the gateway layer.
+        builtin_tools:   Pre-resolved list of built-in BaseTool instances.
+        mcp_tools:       MCP tool instances loaded at boot from MCP servers.
+        skill_loader:    SkillLoader instance for persona + skill injection.
         recursion_limit: Maximum number of tool-call hops before aborting.
     """
 
@@ -70,27 +61,19 @@ class LangGraphLoop(AgentLoop):
         self,
         *,
         system_prompt: str,
-        llm_model: str,
-        llm_url: str,
-        llm_project_id: str,
-        llm_api_key: str | None,
-        max_new_tokens: int = 2048,
+        llm_client: LLMClient,
         builtin_tools: list[BaseTool] | None = None,
         mcp_tools: list[BaseTool] | None = None,
         skill_loader: SkillLoader | None = None,
         recursion_limit: int = 50,
     ) -> None:
         self._system_prompt = system_prompt
-        self._llm_model = llm_model
-        self._llm_url = llm_url
-        self._llm_project_id = llm_project_id
-        self._llm_api_key = llm_api_key
-        self._max_new_tokens = max_new_tokens
+        self._llm_client = llm_client
         self._tools: list[BaseTool] = list(builtin_tools or []) + list(mcp_tools or [])
         self._skill_loader = skill_loader or SkillLoader()
         self._recursion_limit = recursion_limit
 
-        # Loaded at build() time
+        # Populated by build()
         self._persona: str | None = None
         self._skill_index: dict[str, str] = {}
         self._graph: CompiledStateGraph | None = None
@@ -108,13 +91,7 @@ class LangGraphLoop(AgentLoop):
         self._persona = self._skill_loader.load_persona()
         self._skill_index = self._skill_loader.load_skills()
 
-        llm = ChatWatsonx(
-            model_id=self._llm_model,
-            url=SecretStr(self._llm_url),
-            project_id=self._llm_project_id,
-            api_key=self._llm_api_key,
-            params={"max_tokens": self._max_new_tokens},
-        )
+        llm = self._llm_client.as_chat_model()
 
         if self._tools:
             llm = llm.bind_tools(tools=self._tools)
@@ -215,10 +192,8 @@ class LangGraphLoop(AgentLoop):
             Single string to use as the SystemMessage content.
         """
         parts: list[str] = [self._system_prompt]
-
         if self._persona:
             parts.append(self._persona)
-
         if self._skill_index:
             last_human = next(
                 (m.content for m in reversed(turn_messages) if isinstance(m, HumanMessage)),
@@ -229,18 +204,14 @@ class LangGraphLoop(AgentLoop):
                 if skill_name.lower().replace("-", " ") in query or skill_name.lower() in query:
                     parts.append(f"## Skill: {skill_name}\n\n{skill_content}")
                     break
-
         return "\n\n".join(parts)
 
     @staticmethod
     def _to_lc_messages(messages: list[dict[str, Any]]) -> list[BaseMessage]:
         """Convert role/content dicts to LangChain message objects.
 
-        Accepts dicts with ``role`` in ``human|user``, ``ai|assistant``,
-        or ``system``.  Unknown roles default to HumanMessage.
-
         Args:
-            messages: List of message dicts.
+            messages: List of message dicts with ``role`` and ``content``.
 
         Returns:
             List of LangChain BaseMessage instances.

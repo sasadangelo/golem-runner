@@ -21,6 +21,8 @@ def _install_module_mocks() -> None:
     """Inject lightweight stubs into sys.modules for all runner dependencies."""
     stubs = [
         "langchain_ibm",
+        "langchain_openai",
+        "langchain_ollama",
         "langgraph",
         "langgraph.graph",
         "langgraph.graph.message",

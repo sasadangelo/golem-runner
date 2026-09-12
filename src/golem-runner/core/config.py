@@ -148,28 +148,53 @@ class AgentConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    """LLM provider and model parameters."""
+    """LLM provider and model parameters.
 
-    provider: str = Field(default="watsonx", description="LLM provider name.")
-    protocol: str = Field(default="watsonx", description="LangChain protocol/integration to use.")
-    model: str = Field(default="openai/gpt-oss-120b", description="Model identifier to load.")
+    Provider/protocol matrix:
+      provider=watsonx,  protocol=watsonx → IBM WatsonX (langchain-ibm)
+      provider=openai,   protocol=openai  → OpenAI or any OpenAI-compat server
+      provider=ollama,   protocol=openai  → Ollama via OpenAI-compat /v1 layer
+      provider=ollama,   protocol=ollama  → Ollama via native /api/chat
+      provider=vllm,     protocol=openai  → vLLM OpenAI-compat server
+    """
+
+    provider: str = Field(
+        default="watsonx",
+        description="LLM provider name: watsonx | openai | ollama | vllm | lmstudio.",
+    )
+    protocol: str = Field(
+        default="watsonx",
+        description="LangChain protocol/integration: watsonx | openai | ollama.",
+    )
+    model: str = Field(
+        default="openai/gpt-oss-120b",
+        description="Model identifier (provider-specific, e.g. 'llama3', 'gpt-4o', 'meta-llama/...').",
+    )
     url: str = Field(
         default="https://us-south.ml.cloud.ibm.com",
-        description="WatsonX service URL.",
+        description=(
+            "Service endpoint URL. "
+            "WatsonX: https://us-south.ml.cloud.ibm.com · "
+            "Ollama: http://localhost:11434 · "
+            "OpenAI-compat: base URL including /v1 suffix if required."
+        ),
     )
     project_id: str = Field(
-        default="9def6989-c276-4042-8fc2-5b77a8e56ade",
-        description="WatsonX project ID.",
+        default="",
+        description="WatsonX project UUID (required only when provider=watsonx).",
     )
     max_new_tokens: int = Field(
         default=2048,
-        description="Maximum number of tokens the model can generate in a single response "
-        "(mapped to max_tokens in the WatsonX TextChatParameters).",
+        description="Maximum number of tokens the model may generate per response.",
     )
-    # Secret — populated from WATSONX_API_KEY in model_post_init, never from YAML.
+    # Secret — never loaded from YAML; resolved in model_post_init from env vars.
+    # Resolution order: LLM_API_KEY → OPENAI_API_KEY → WATSONX_API_KEY (legacy).
     api_key: SecretStr | None = Field(
         default=None,
-        description="WatsonX API key (injected from WATSONX_API_KEY env var).",
+        description=(
+            "API key for the selected provider. "
+            "Injected from env: LLM_API_KEY (universal) or OPENAI_API_KEY or WATSONX_API_KEY."
+        ),
     )
 
 
@@ -237,8 +262,13 @@ class Settings(BaseSettings):
         if agent_overrides:
             self.agent = self.agent.model_copy(update=agent_overrides)
 
-        # Inject WATSONX_API_KEY — never from YAML.
-        api_key = os.getenv("WATSONX_API_KEY")
+        # Inject LLM API key from env — never from YAML.
+        # Resolution order: LLM_API_KEY (universal) > OPENAI_API_KEY > WATSONX_API_KEY (legacy).
+        api_key = (
+            os.getenv("LLM_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("WATSONX_API_KEY")
+        )
         if api_key:
             self.llm = self.llm.model_copy(update={"api_key": SecretStr(api_key)})
 
