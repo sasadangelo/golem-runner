@@ -78,7 +78,9 @@ agent:
   description: "What this agent does."
   endpoint: "http://localhost:8000"     # Public URL of this container
   system_prompt: "You are a helpful agent."
-  enabled_skills: "bash,http_check"     # Comma-separated embedded tool IDs
+  builtin_tools:                        # Built-in tool IDs to enable
+    - bash
+    - http_check
 
   # Optional — only needed for agents that delegate tasks to other agents
   cp_url: "http://golem-cp.golem-system.svc.cluster.local:9000"
@@ -122,7 +124,8 @@ llm:
 
 ## Embedded Tools
 
-Tools declared in `agent.enabled_skills` are registered into the LangGraph tool node at boot.
+Tools declared in `agent.builtin_tools` are registered into the LangGraph tool node at boot.
+MCP tools from `agent.mcp_servers` are loaded automatically at startup and added alongside them.
 
 | Tool ID | Description |
 |---|---|

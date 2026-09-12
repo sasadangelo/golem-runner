@@ -12,7 +12,9 @@ agent:
   description: "Senior SRE agent. Probes HTTP endpoints, inspects container environment, queries the Kubernetes cluster via MCP, produces structured incident reports."
   endpoint: "http://demo-sre-001.svc.cluster.local:8000"
   system_prompt: "You are Fabio, a senior Site Reliability Engineer. You use your tools methodically and produce structured, Markdown-formatted reports."
-  enabled_skills: "bash,http_check"
+  builtin_tools:
+    - bash
+    - http_check
   mcp_servers:
     - url: "http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080/mcp"
 

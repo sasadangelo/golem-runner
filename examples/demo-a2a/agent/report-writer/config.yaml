@@ -11,7 +11,8 @@ agent:
   description: "Transforms raw diagnostic findings into professional Markdown incident reports."
   endpoint: "http://report-writer-001.report-writer-001.svc.cluster.local:8000"
   system_prompt: "You are a Report Writer. Transform raw findings into professional Markdown incident reports."
-  enabled_skills: "bash"
+  builtin_tools:
+    - bash
   cp_url: "http://golem-cp.golem-system.svc.cluster.local:9000"
 
 llm:

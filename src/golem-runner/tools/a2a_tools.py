@@ -22,10 +22,12 @@ import logging
 import time
 
 import httpx
-from core.config import settings
+from httpx._models import Response
 from langchain_core.tools import tool
 
-logger = logging.getLogger("runner.a2a")
+from core.config import settings
+
+logger = logging.getLogger(name="runner.a2a")
 
 _POLL_INTERVAL: float = 3.0  # seconds between status polls
 
@@ -50,20 +52,20 @@ def delegate_to_agent(target_agent_id: str, message: str) -> str:
         The result produced by the target agent, or an error message if the
         delegation failed or timed out.
     """
-    cp_url = settings.agent.cp_url.rstrip("/")
+    cp_url: str = settings.agent.cp_url.rstrip("/")
     if not cp_url:
         return "ERROR: agent.cp_url is not configured — cannot delegate tasks."
 
-    source_id = settings.agent.id
-    delegate_url = f"{cp_url}/agents/{source_id}/delegate"
+    source_id: str = settings.agent.id
+    delegate_url: str = f"{cp_url}/agents/{source_id}/delegate"
     timeout_seconds: int = settings.agent.delegation_timeout_seconds
 
     # ------------------------------------------------------------------
     # Step 1 — submit the task (fire-and-forget, expects 202)
     # ------------------------------------------------------------------
     try:
-        resp = httpx.post(
-            delegate_url,
+        resp: Response = httpx.post(
+            url=delegate_url,
             json={"target_agent_id": target_agent_id, "message": message, "source": "a2a"},
             timeout=30,
         )
@@ -78,18 +80,20 @@ def delegate_to_agent(target_agent_id: str, message: str) -> str:
 
     data = resp.json()
     task_id: str = data.get("task_id", "unknown")
-    logger.info("Delegated task %s to agent %s — polling for result (timeout=%ds)", task_id, target_agent_id, timeout_seconds)
+    logger.info(
+        "Delegated task %s to agent %s — polling for result (timeout=%ds)", task_id, target_agent_id, timeout_seconds
+    )
 
     # ------------------------------------------------------------------
     # Step 2 — poll until terminal state or timeout
     # ------------------------------------------------------------------
-    poll_url = f"{cp_url}/agents/{target_agent_id}/tasks/{task_id}"
-    deadline = time.monotonic() + timeout_seconds
+    poll_url: str = f"{cp_url}/agents/{target_agent_id}/tasks/{task_id}"
+    deadline: float = time.monotonic() + timeout_seconds
 
     while time.monotonic() < deadline:
         time.sleep(_POLL_INTERVAL)
         try:
-            poll_resp = httpx.get(poll_url, timeout=10)
+            poll_resp: Response = httpx.get(url=poll_url, timeout=10)
             poll_resp.raise_for_status()
         except httpx.HTTPError as exc:
             logger.warning("Poll for task %s failed: %s — retrying", task_id, exc)

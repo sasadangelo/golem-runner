@@ -41,6 +41,9 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]  # pycodestyle, pyflakes, isort, pyupgrade
 
+[tool.ruff.lint.isort]
+known-first-party = ["core", "tools", "golem_agent_sdk", "golem_framework"]
+
 [tool.ruff.format]
 line-ending = "lf"
 

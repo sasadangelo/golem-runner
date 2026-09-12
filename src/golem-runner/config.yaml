@@ -4,9 +4,11 @@ agent:
   description: "Generic automation agent powered by Golem."
   endpoint: "http://localhost:8001"
   system_prompt: "You are a helpful generic automation agent."
-  enabled_skills: "bash,http_check"
+  builtin_tools:
+    - bash
+    - http_check
   # cp_url: Control Plane base URL for handshake registration and A2A delegation.
-  # Required only for agents that delegate tasks to other agents via the `delegate` skill.
+  # Required only for agents that delegate tasks to other agents via the `delegate` built-in tool.
   # Leave empty (or omit) for standalone agents.
   # Example:
   #   cp_url: "http://golem-cp.golem-system.svc.cluster.local:9000"

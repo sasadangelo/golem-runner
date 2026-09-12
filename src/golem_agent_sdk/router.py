@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from asyncio.events import AbstractEventLoop
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -143,16 +144,17 @@ def build_a2a_router(
     # A2A task lifecycle endpoints
     # ------------------------------------------------------------------
 
-    @router.post("/tasks/send", response_model=A2ATaskResponse, status_code=202)
+    @router.post(path="/tasks/send", response_model=A2ATaskResponse, status_code=200)
     async def tasks_send(params: A2ASendRequest) -> A2ATaskResponse:
         """
-        Receive an inbound A2A task and execute it asynchronously (fire-and-forget).
+        Receive an inbound A2A task, execute it and return the result.
 
-        The task is created immediately with ``status=submitted`` and the response
-        is returned before execution begins.  Poll ``GET /a2a/tasks/{task_id}``
-        to check progress.
+        The executor runs in a thread pool so the event loop is never blocked.
+        The response is returned only when execution completes or fails.
+        The task record is always stored so GET /a2a/tasks/{id} reflects the
+        final state immediately after this call returns.
 
-        Lifecycle: submitted → working → completed / failed.
+        Lifecycle: working → completed / failed.
 
         Args:
             params: The A2A task request with an optional task ID and a message.
@@ -167,34 +169,31 @@ def build_a2a_router(
         task: A2ATask = A2ATask(
             task_id=params.id or f"task-{uuid.uuid4().hex[:12]}",
             message=text,
-            status=TaskStatus.SUBMITTED,
+            status=TaskStatus.WORKING,
             source=params.source,
         )
         task_store.add(task)
 
-        async def _run() -> None:
-            task.status = TaskStatus.WORKING
-            task.updated_at = datetime.now(UTC)
-            try:
-                loop = asyncio.get_event_loop()
-                reply: str = await loop.run_in_executor(None, executor, text)
-                task.status = TaskStatus.COMPLETED
-                task.result = reply
-            except Exception as exc:  # noqa: BLE001
-                task.status = TaskStatus.FAILED
-                task.result = str(exc)
-            finally:
-                task.updated_at = datetime.now(UTC)
-
-        asyncio.create_task(_run())
+        loop: AbstractEventLoop = asyncio.get_event_loop()
+        try:
+            reply: str = await loop.run_in_executor(None, executor, text)
+            task.status = TaskStatus.COMPLETED
+            task.result = reply
+        except Exception as exc:  # noqa: BLE001
+            task.status = TaskStatus.FAILED
+            task.result = str(exc)
+            task.updated_at = datetime.now(tz=UTC)
+            raise HTTPException(status_code=500, detail=task.result) from exc
+        finally:
+            task.updated_at = datetime.now(tz=UTC)
 
         return A2ATaskResponse(
             id=task.task_id,
-            status={"state": TaskStatus.SUBMITTED},
-            artifacts=[],
+            status={"state": TaskStatus.COMPLETED},
+            artifacts=[{"parts": [{"type": "text", "text": reply}]}],
         )
 
-    @router.get("/tasks/{task_id}", response_model=TaskStatusResponse)
+    @router.get(path="/tasks/{task_id}", response_model=TaskStatusResponse)
     async def get_task(task_id: str) -> TaskStatusResponse:
         """
         Return the current lifecycle state of an A2A task.
@@ -237,7 +236,7 @@ def build_a2a_router(
 
     if scheduler is not None:
 
-        @router.post("/triggers", response_model=TriggerResponse, status_code=201)
+        @router.post(path="/triggers", response_model=TriggerResponse, status_code=201)
         async def create_trigger(
             trigger: Annotated[CronTrigger | TimerTrigger | WebhookTrigger, Body(discriminator="type")],
         ) -> TriggerResponse:
@@ -253,12 +252,12 @@ def build_a2a_router(
             await scheduler._start_trigger(trigger)  # noqa: SLF001
             return _trigger_to_response(trigger)
 
-        @router.get("/triggers", response_model=list[TriggerResponse])
+        @router.get(path="/triggers", response_model=list[TriggerResponse])
         async def list_triggers() -> list[TriggerResponse]:
             """Return all registered triggers."""
             return [_trigger_to_response(t) for t in scheduler.list_all()]
 
-        @router.get("/triggers/{trigger_id}", response_model=TriggerResponse)
+        @router.get(path="/triggers/{trigger_id}", response_model=TriggerResponse)
         async def get_trigger(trigger_id: str) -> TriggerResponse:
             """
             Return a single trigger by ID.
@@ -266,12 +265,12 @@ def build_a2a_router(
             Args:
                 trigger_id: The unique trigger identifier.
             """
-            t = scheduler.get(trigger_id)
+            t: TriggerConfig | None = scheduler.get(trigger_id)
             if t is None:
                 raise HTTPException(status_code=404, detail=f"Trigger {trigger_id} not found.")
             return _trigger_to_response(t)
 
-        @router.delete("/triggers/{trigger_id}", status_code=204)
+        @router.delete(path="/triggers/{trigger_id}", status_code=204)
         async def delete_trigger(trigger_id: str) -> None:
             """
             Remove and stop a trigger.

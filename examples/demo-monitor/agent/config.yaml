@@ -29,7 +29,9 @@ agent:
             -d "{\"text\": \"✅ *SERVICE RECOVERED* — <url> is back up (HTTP 200).\"}"
 
     Always use the exact URL provided. Never make assumptions about the service state.
-  enabled_skills: "bash,http_check"
+  builtin_tools:
+    - bash
+    - http_check
   env_secrets:
     - "slack-credentials"
 

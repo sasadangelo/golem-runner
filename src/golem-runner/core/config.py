@@ -93,9 +93,9 @@ class AgentConfig(BaseModel):
         default="You are a helpful generic automation agent.",
         description="System prompt that defines the agent persona.",
     )
-    enabled_skills: str = Field(
-        default="bash,http_check",
-        description="Comma-separated list of skills to enable (e.g. 'bash,http_check').",
+    builtin_tools: list[str] = Field(
+        default_factory=lambda: ["bash", "http_check"],
+        description="List of built-in tools to enable (e.g. [bash, http_check, delegate]).",
     )
     cp_url: str = Field(
         default="",
@@ -187,7 +187,7 @@ _AGENT_ENV_MAP: dict[str, str] = {
     "AGENT_DESCRIPTION": "description",
     "AGENT_ENDPOINT": "endpoint",
     "AGENT_SYSTEM_PROMPT": "system_prompt",
-    "AGENT_ENABLED_SKILLS": "enabled_skills",
+    "AGENT_BUILTIN_TOOLS": "builtin_tools",
     "AGENT_CP_URL": "cp_url",
 }
 

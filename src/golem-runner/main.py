@@ -12,14 +12,15 @@ from typing import Any
 
 import httpx
 from agent import build_agent
-from core.config import settings
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
+from core.config import MCPServerConfig, settings
 from golem_agent_sdk.router import build_a2a_router, task_store
 from golem_agent_sdk.trigger_scheduler import TriggerScheduler
 
@@ -61,8 +62,6 @@ _RECURSION_LIMIT: int = 50
 # A2A Agent Card — served at /.well-known/agent.json (A2A v1.0 spec)
 # ---------------------------------------------------------------------------
 
-_enabled_skills: list[str] = [s.strip() for s in settings.agent.enabled_skills.split(",") if s.strip()]
-
 AGENT_CARD: dict[str, Any] = {
     "id": settings.agent.id,
     "name": settings.agent.name,
@@ -73,7 +72,11 @@ AGENT_CARD: dict[str, Any] = {
         "streaming": True,
         "pushNotifications": False,
     },
-    "skills": [{"id": skill, "name": skill} for skill in _enabled_skills],
+    "skills": [],  # populated at startup after MCP servers are loaded
+    "tools": {
+        "builtin": [{"id": t, "name": t} for t in settings.agent.builtin_tools],
+        "mcp": [],  # populated at startup after MCP servers are loaded
+    },
 }
 
 
@@ -106,25 +109,25 @@ async def _register_with_control_plane(card: dict[str, Any]) -> None:
 
 
 async def _load_mcp_tools() -> list[BaseTool]:
-    """Connect to each MCP server in ``settings.agent.mcp_servers`` and
-    collect their tools.
+    """Load the tools exposed by MCP servers configured under ``agent.mcp_servers``.
 
     Returns an empty list when no MCP servers are configured or when all
     servers are unreachable (failures are logged as warnings).
     """
-    mcp_logger = logging.getLogger("runner.mcp")
+    mcp_logger = logging.getLogger(name="runner.mcp")
 
-    servers = settings.agent.mcp_servers
+    # ``mcp_servers`` comes from the runner configuration, not from the agent graph.
+    servers: list[MCPServerConfig] = settings.agent.mcp_servers
     if not servers:
-        mcp_logger.info("No MCP servers configured — starting with built-in tools only")
+        mcp_logger.info(msg="No MCP servers configured — starting with built-in tools only")
         return []
 
-    from langchain_mcp_adapters.client import MultiServerMCPClient
-
+    # Adapt every configured server to the MultiServerMCPClient connection format.
+    # Headers are resolved here so secrets/config references never reach the graph.
     connections: dict[str, Any] = {}
     for i, srv in enumerate(servers):
         entry: dict[str, Any] = {"url": srv.url, "transport": "streamable_http"}
-        resolved = srv.resolved_headers()
+        resolved: dict[str, str] = srv.resolved_headers()
         if resolved:
             entry["headers"] = resolved
         connections[f"mcp_{i}"] = entry
@@ -133,7 +136,8 @@ async def _load_mcp_tools() -> list[BaseTool]:
 
     tools: list[BaseTool] = []
     try:
-        mcp_client = MultiServerMCPClient(connections)
+        # Connect asynchronously and convert each remote MCP tool into a LangChain BaseTool.
+        mcp_client: MultiServerMCPClient = MultiServerMCPClient(connections)
         tools = await mcp_client.get_tools()
         mcp_logger.info(
             "Loaded %d MCP tool(s) from %d server(s): %s",
@@ -183,16 +187,19 @@ async def lifespan(app_: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI lifespan: load MCP tools, compile agent, start triggers, handshake."""
     global agent_executor, trigger_scheduler  # noqa: PLW0603
 
-    mcp_tools = await _load_mcp_tools()
+    mcp_tools: list[BaseTool] = await _load_mcp_tools()
     agent_executor = build_agent(mcp_tools=mcp_tools)
     logger.info("Agent compiled — built-in tools + %d MCP tool(s)", len(mcp_tools))
 
-    await _register_with_control_plane(AGENT_CARD)
+    # Populate the MCP section of the Agent Card now that tools are known.
+    AGENT_CARD["tools"]["mcp"] = [{"id": t.name, "name": t.name} for t in mcp_tools]
+
+    await _register_with_control_plane(card=AGENT_CARD)
 
     # Start background trigger scheduler
     trigger_scheduler = TriggerScheduler(executor=_langgraph_executor, task_store=task_store)
-    _seed_triggers_from_config(trigger_scheduler)
-    await trigger_scheduler.start(app_)
+    _seed_triggers_from_config(scheduler=trigger_scheduler)
+    await trigger_scheduler.start(app=app_)
     logger.info("TriggerScheduler started with %d trigger(s)", len(trigger_scheduler.list_all()))
 
     try:
@@ -268,7 +275,7 @@ class _SchedulerProxy:
         return getattr(trigger_scheduler, name)
 
 
-_scheduler_proxy = _SchedulerProxy()
+_scheduler_proxy: _SchedulerProxy = _SchedulerProxy()
 
 app.include_router(build_a2a_router(_langgraph_executor, scheduler=_scheduler_proxy))  # type: ignore[arg-type]
 
@@ -312,6 +319,7 @@ async def ws_chat(websocket: WebSocket, conversation_id: str | None = None) -> N
         conversation_id: Optional UUID forwarded by the Control Plane proxy.
     """
     assert agent_executor is not None, "agent_executor not initialised"  # noqa: S101
+    # Complete the WebSocket handshake before receiving or sending messages.
     await websocket.accept()
 
     # Resolve the history bucket — "" is the legacy implicit conversation.
@@ -325,27 +333,34 @@ async def ws_chat(websocket: WebSocket, conversation_id: str | None = None) -> N
     )
 
     try:
+        # Keep the connection open so one client can send multiple chat turns.
         while True:
             user_message: str = await websocket.receive_text()
             logger.info("WS chat message received (%d chars)", len(user_message))
+
+            # Give the graph the complete conversation, including this new turn.
             history.append(HumanMessage(content=user_message))
             inputs: dict[str, list[BaseMessage]] = {"messages": history}
             reply_tokens: list[str] = []
             tool_calls_made: int = 0
             try:
+                # Run the complete LangGraph agent loop. It may invoke tools and
+                # make multiple model calls; events arrive as each step progresses.
                 async for event in agent_executor.astream_events(
                     inputs,
                     version="v2",
                     config={"recursion_limit": _RECURSION_LIMIT},
                 ):
-                    kind = event["event"]
+                    kind: str = event["event"]
                     if kind == "on_tool_start":
+                        # Tool activity is recorded server-side, not sent to the client.
                         tool_calls_made += 1
                         logger.info("Tool call: %s  args=%s", event["name"], event["data"].get("input"))
                     elif kind == "on_tool_end":
                         output = str(event["data"].get("output", ""))[:200]
                         logger.info("Tool result: %s  → %s", event["name"], output)
                     elif kind == "on_chat_model_stream":
+                        # Forward each model text chunk immediately over the WebSocket.
                         chunk = event["data"].get("chunk")
                         if chunk is None:
                             continue
@@ -353,13 +368,18 @@ async def ws_chat(websocket: WebSocket, conversation_id: str | None = None) -> N
                         if token:
                             reply_tokens.append(token)
                             await websocket.send_text(token)
+
+                # Some tool-only runs emit no model text; still give the client a reply.
                 if not reply_tokens and tool_calls_made > 0:
                     await websocket.send_text("✅ Done.")
                     reply_tokens = ["✅ Done."]
+
+                # Mark the stream boundary and persist the reply for the next turn.
                 await websocket.send_text(data="[DONE]")
                 history.append(AIMessage(content="".join(reply_tokens)))
                 logger.info("Turn complete — %d tokens streamed", len(reply_tokens))
             except Exception as e:
+                # Discard the unprocessed user message to preserve a consistent history.
                 history.pop()
                 await websocket.send_text(data=f"[ERROR] {e}")
                 logger.error("Agent error during turn: %s", e)
