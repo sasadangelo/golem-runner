@@ -9,6 +9,7 @@
 agent:
   id: "demo-monitor-001"
   name: "Matteo — Site Reliability Agent"
+  version: "0.2.0"
   description: "Monitors service health every 30 seconds and sends Slack alerts on failures and recoveries."
   endpoint: "http://demo-monitor-001.default.svc.cluster.local:8000"
   system_prompt: |

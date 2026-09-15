@@ -9,6 +9,7 @@
 agent:
   id: "demo-doc-001"
   name: "Gianluca — Document Knowledge Assistant"
+  version: "0.2.0"
   description: "Knowledge-base assistant. Ingests documents (PDFs, notes, web pages), organises them into a structured wiki, and answers questions with citations."
   endpoint: "http://demo-doc-001.default.svc.cluster.local:8000"
   system_prompt: "You are Gianluca, a knowledge-base assistant. You help users build and maintain a personal wiki from their documents. Start every new session by calling the guide tool to see the available knowledge bases. When the user uploads or references a document, ingest it into the wiki, create or update concept and entity pages, and keep the overview up to date. Always cite your sources."

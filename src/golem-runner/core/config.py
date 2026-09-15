@@ -81,6 +81,15 @@ class AgentConfig(BaseModel):
 
     id: str = Field(default="golem-agent-001", description="Unique identifier for this agent instance.")
     name: str = Field(default="Golem Agent Runner", description="Human-readable agent name.")
+    version: str = Field(
+        default="0.2.0",
+        description=(
+            "Runner version this agent requires. "
+            "Used by ProcessProvisioner to resolve the effective runner path as "
+            "runner_path / version / src / golem-runner. "
+            "Also used as the image tag by DockerProvisioner and KubernetesProvisioner."
+        ),
+    )
     description: str = Field(
         default="Generic automation agent powered by Golem.",
         description="Short description shown in the A2A Agent Card.",
@@ -202,8 +211,24 @@ class LLMConfig(BaseModel):
 # Root Settings
 # ---------------------------------------------------------------------------
 
-_CONFIG_YAML = Path(__file__).parent.parent / "config.yaml"
-_ENV_FILE = Path(__file__).parent.parent / ".env"
+# GOLEM_CONFIG_DIR — workspace directory override.
+#
+# Why an environment variable and not a config.yaml field?
+# Bootstrap problem: to know *where* to read config.yaml the process must
+# already have that information *before* opening any file.  The only
+# mechanism available at that point is the process environment.  The
+# ProcessProvisioner sets GOLEM_CONFIG_DIR=~/.golem/agents/<id>/ in the
+# subprocess env so each agent reads its own isolated workspace without
+# the runner source directory ever being written to.
+#
+# When GOLEM_CONFIG_DIR is not set the runner falls back to the directory
+# that contains this source file (backward-compatible default).
+_GOLEM_CONFIG_DIR: Path = (
+    Path(os.environ["GOLEM_CONFIG_DIR"]) if "GOLEM_CONFIG_DIR" in os.environ else Path(__file__).parent.parent
+)
+
+_CONFIG_YAML = _GOLEM_CONFIG_DIR / "config.yaml"
+_ENV_FILE = _GOLEM_CONFIG_DIR / ".env"
 
 # Mapping of AGENT_* env vars → AgentConfig field names
 _AGENT_ENV_MAP: dict[str, str] = {

@@ -8,6 +8,7 @@
 agent:
   id: "log-analyzer-001"
   name: "Log Analyzer"
+  version: "0.2.0"
   description: "Fetches application logs, detects HTTP 500 errors and anomalies, delegates report writing to Report Writer."
   endpoint: "http://log-analyzer-001.log-analyzer-001.svc.cluster.local:8000"
   system_prompt: "You are a Log Analyzer. Fetch logs, identify errors and anomalies, then delegate report writing to report-writer-001."

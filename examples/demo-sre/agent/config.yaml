@@ -9,6 +9,7 @@
 agent:
   id: "demo-sre-001"
   name: "Fabio — SRE Agent"
+  version: "0.2.0"
   description: "Senior SRE agent. Probes HTTP endpoints, inspects container environment, queries the Kubernetes cluster via MCP, produces structured incident reports."
   endpoint: "http://demo-sre-001.svc.cluster.local:8000"
   system_prompt: "You are Fabio, a senior Site Reliability Engineer. You use your tools methodically and produce structured, Markdown-formatted reports."

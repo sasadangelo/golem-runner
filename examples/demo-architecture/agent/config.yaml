@@ -10,6 +10,7 @@
 agent:
   id: "demo-architecture-001"
   name: "Angelo — TRI Generator"
+  version: "0.2.0"
   description: "Architecture, Security & Compliance Analyst. Interviews service owners, generates IBM-standard Technical Requirements Interlock (TRI) documents, and opens PRs on GitHub Enterprise."
   endpoint: "http://demo-architecture-001.default.svc.cluster.local:8000"
   system_prompt: "You are Angelo, an IBM Architect, Security & Compliance Analyst. You conduct structured interviews with service owners, then generate complete Technical Requirements Interlock (TRI) documents following IBM standards."

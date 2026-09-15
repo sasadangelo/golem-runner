@@ -8,6 +8,7 @@
 agent:
   id: "report-writer-001"
   name: "Report Writer"
+  version: "0.2.0"
   description: "Transforms raw diagnostic findings into professional Markdown incident reports."
   endpoint: "http://report-writer-001.report-writer-001.svc.cluster.local:8000"
   system_prompt: "You are a Report Writer. Transform raw findings into professional Markdown incident reports."
