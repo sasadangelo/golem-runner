@@ -7,7 +7,7 @@ Apply this skill whenever the user asks to:
 - "show me the system info / memory / disk / CPU"
 - "what environment variables are set?" (redact secrets)
 - "what processes are running?"
-- "show me the mounted files" / "what's in /app?"
+- "show me the mounted files" / "what's in my workspace?"
 - "show me the logs" (read from a known path)
 - general container or system introspection
 
@@ -35,9 +35,10 @@ echo "=== Disk ===" && df -h / 2>/dev/null
 ### Step 3 — Mounted files (agent configuration)
 
 ```bash
-echo "=== /app contents ===" && ls -lh /app/ 2>/dev/null
-echo "=== /app/skills ===" && ls -lh /app/skills/ 2>/dev/null || echo "(no skills directory)"
-echo "=== config.yaml ===" && cat /app/config.yaml 2>/dev/null | grep -v api_key
+echo "=== GOLEM_CONFIG_DIR ===" && echo "${GOLEM_CONFIG_DIR:-<not set>}"
+echo "=== workspace contents ===" && ls -lh "${GOLEM_CONFIG_DIR}/" 2>/dev/null
+echo "=== skills ===" && ls -lh "${GOLEM_CONFIG_DIR}/skills/" 2>/dev/null || echo "(no skills directory)"
+echo "=== config.yaml ===" && cat "${GOLEM_CONFIG_DIR}/config.yaml" 2>/dev/null | grep -v api_key
 ```
 
 ### Step 4 — Environment variables (redact secrets)
@@ -68,7 +69,7 @@ ps aux 2>/dev/null || ps -ef 2>/dev/null
 - **Disk (/)**: <value>
 
 ### Agent Configuration
-<summary of what's mounted at /app — config.yaml present? AGENTS.md? skills?>
+<summary of what's in $GOLEM_CONFIG_DIR — config.yaml present? AGENTS.md? skills?>
 
 ### Environment Variables
 <table or list — sensitive values redacted as [REDACTED]>
